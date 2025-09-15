@@ -1,5 +1,5 @@
 
-import concurrent.futures, socket
+import socket
 import threading
 from peer_db import PeerDatabase
 from protocol_parser import ProtocolParser
@@ -110,9 +110,34 @@ class RendezvousServer:
 
             
             
-    def start(self, max_workers: int = 64, backlog: int = 128):
+    def start(
+        self,
+        max_workers: int = 64,
+        backlog: int = 128,
+        ka_idle: int = 60,
+        ka_intvl: int = 15,
+        ka_cnt: int = 4,
+    ):
+        import concurrent.futures  # keep import local to avoid new global deps
+            
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        
+        # Enable TCP keepalive on the listening socket (best effort / platform-aware)
+        try:
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            if hasattr(socket, "TCP_KEEPIDLE"):
+                server.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, ka_idle)
+            if hasattr(socket, "TCP_KEEPINTVL"):
+                server.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, ka_intvl)
+            if hasattr(socket, "TCP_KEEPCNT"):
+                server.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, ka_cnt)
+            # macOS uses TCP_KEEPALIVE (idle time)
+            if hasattr(socket, "TCP_KEEPALIVE"):
+                server.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPALIVE, ka_idle)
+        except Exception as e:
+            log.debug("Keepalive tuning not supported on listener: %s", e)
+
         server.bind((self.host, self.port))
         server.listen(backlog)
         
@@ -124,9 +149,22 @@ class RendezvousServer:
         ) as executor:
             while True:
                 connection, address = server.accept()
+                
+                # Also enable keepalive on accepted sockets (some OSes don't inherit all opts)
+                try:
+                    connection.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                    if hasattr(socket, "TCP_KEEPIDLE"):
+                        connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, ka_idle)
+                    if hasattr(socket, "TCP_KEEPINTVL"):
+                        connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, ka_intvl)
+                    if hasattr(socket, "TCP_KEEPCNT"):
+                        connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, ka_cnt)
+                    if hasattr(socket, "TCP_KEEPALIVE"):
+                        connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPALIVE, ka_idle)
+                except Exception as e:
+                    log.debug("Keepalive not supported on accepted socket %s:%s: %s", *address, e)
+
                 # Hand over to the pool (limits concurrency)
                 executor.submit(self.handle_client, connection, address)
-        
-
 
 

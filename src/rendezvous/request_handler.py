@@ -38,6 +38,7 @@ class RequestHandler:
             if not isinstance(namespace, str) or not namespace or len(namespace) > 64:
                 log.warning("REGISTER invalid (namespace)")
                 return json.dumps({"status": "ERROR", "error": "bad_namespace"})
+            
             try:
                 port = int(port)
                 if not (1 <= port <= 65535):
