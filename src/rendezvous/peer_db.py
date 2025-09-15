@@ -4,6 +4,9 @@ from models import PeerRecord
 from datetime import datetime
 import threading, tempfile
 from dataclasses import asdict
+import logging
+
+log = logging.getLogger("peer_db")
 
 class PeerDatabase:
     def __init__(self, filename="peers.json"):
@@ -13,13 +16,14 @@ class PeerDatabase:
 
     def _load(self):
         if not os.path.exists(self.filename):
+            log.info("Peer DB file not found (%s); starting empty", self.filename)
             return []
 
         try:
             with open(self.filename, "r", encoding="utf-8") as f:
                 raw = json.load(f)
         except json.JSONDecodeError:
-            # arquivo corrompido: não quebra o servidor
+            log.error("File %s is corrupted; starting empty", self.filename)
             return []
 
         records = []
@@ -39,6 +43,8 @@ class PeerDatabase:
             # se já for datetime, deixa como está
 
             records.append(PeerRecord(**data))
+            
+        log.info("Loaded %d peer(s) from %s", len(records), self.filename)
         return records
 
 
@@ -60,22 +66,37 @@ class PeerDatabase:
 
         with self._lock:
             with open(tmpf, "w", encoding="utf-8") as f:
-                json.dump(payload, f, ensure_ascii=False, indent=2)
+                json.dump(payload, f, ensure_ascii=False, indent=2, sort_keys=True)
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmpf, self.filename)
+            
+            log.info("Saved %d peer(s) into %s", len(self.peers), self.filename)
+
+    def _sweep(self):
+        before = len(self.peers)
+        self.peers = [p for p in self.peers if not p.is_expired()]
+        expired = before - len(self.peers)
+        if expired:
+            log.info("Expired %d peer(s) removed", expired)
+
 
     def add_peer(self, peer: PeerRecord):
-        self.peers = [p for p in self.peers if not p.is_expired()]
+        self._sweep()
         self.peers.append(peer)
         self._save()
 
     def remove_peer(self, ip, namespace):
+        before = len(self.peers)
         self.peers = [p for p in self.peers if not (p.ip == ip and p.namespace == namespace)]
+        removed = before - len(self.peers)
+        log.info("Removed %d peer(s) ip=%s ns=%s", removed, ip, namespace)
         self._save()
 
+        
+
     def get_peers(self, namespace=None):
-        self.peers = [p for p in self.peers if not p.is_expired()]
+        self._sweep()
         if namespace:
             return [p for p in self.peers if p.namespace == namespace]
         return self.peers

@@ -5,7 +5,9 @@ from peer_db import PeerDatabase
 from protocol_parser import ProtocolParser
 from request_handler import RequestHandler
 import json
+import logging
 
+log = logging.getLogger("rendezvous")
 
 class RendezvousServer:
     def __init__(self, host='0.0.0.0', port=5000):
@@ -19,35 +21,74 @@ class RendezvousServer:
     def handle_client(self, connection, address):
         connection.settimeout(5)
         buf = b""
+        line = None
+        peer = f"{address[0]}:{address[1]}"
+        log.info(f"Connection from {peer}")
         
         try:
             while True:
                 try:
                     chunk = connection.recv(4096)
                     if not chunk:
+                        # EOF: se já tem algo no buffer, processa como uma linha; senão encerra.
+                        if buf.strip():
+                            line = buf
                         break
                     buf += chunk
                     
-                    while b"\n" in buf:
-                        line, buf = buf.split(b"\n", 1)
-                        if not line.strip():
-                            continue
-                        
-                        request = self.parser.parse(line.decode("utf-8", errors="replace"))
-                        response = self.handler.handle(request, address[0], observed_port=address[1])
-                        connection.sendall((response + "\n").encode("utf-8"))
-                        
+                    if b"\n" in buf:
+                        line, _rest = buf.split(b"\n", 1)
+                        break
+                    
                 except (TimeoutError, socket.timeout):
-                    msg = json.dumps({"status": "ERROR", "message": "Timeout: no data received, closing connection"}) + "\n"
+                    msg = json.dumps({"status": "ERROR", "message": "Timeout: no data received, closing connection"}) 
+                    
+                    log.warning("Timeout waiting data from %s; sending error and closing", peer)
+
                     
                     try:
-                        connection.sendall(msg.encode("utf-8") + b"\n")
-                        break
-                    except Exception:
-                        # the connection is probably already closed
-                        pass
+                        connection.sendall((msg + "\n").encode("utf-8"))
+                    finally:
+                        return # close connection at finally block
+                    
+            # if did come useful data, process it and close connection        
+            if not line or not line.strip():
+                msg = json.dumps({"status": "ERROR", "message": "Empty request line"})
+                log.warning("Empty request line from %s; sending error", peer)
+
+                connection.sendall((msg + "\n").encode("utf-8"))
+                return
+            
+            # parse and handle request    
+            raw = line.decode("utf-8", errors="replace")         
+            log.info("Received from %s: %s", peer, raw.strip())  
+        
+            request = self.parser.parse(raw)
+            
+            log.info("Parsed request (%s) from %s", request.command, peer)
+
+            response = self.handler.handle(request, address[0], observed_port=address[1])
+            connection.sendall((response + "\n").encode("utf-8"))
+            
+            try:  
+                status = json.loads(response).get("status") 
+            except Exception:
+                status = "?"
+            log.info("Responded to %s (status=%s)", peer, status)
+
+            
+            # after sending response, just close connection
+            return
+               
         finally:
+            try:
+                connection.shutdown(socket.SHUT_RDWR)
+            except Exception:
+                pass
+            
             connection.close()
+            log.info("Connection closed with %s", peer)
+
             
             
     def start(self):
@@ -55,12 +96,18 @@ class RendezvousServer:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((self.host, self.port))
         server.listen()
-        print(f"Rendezvous server listening on {self.host}:{self.port}")
+        log.info("Rendezvous server listening on %s:%d", self.host, self.port)
         
         
         while True:
             connection, address = server.accept()
-            threading.Thread(target=self.handle_client, args=(connection, address)).start()
+            
+            threading.Thread(
+                target=self.handle_client,
+                args=(connection, address),
+                daemon=True,
+                name=f"cli-{address[0]}:{address[1]}",
+            ).start()
         
 
 

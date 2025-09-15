@@ -1,0 +1,14 @@
+{"type":"REGISTER","namespace":"room1","name":"peerA","port":4000,"ttl":60}
+{"type":"REGISTER","namespace":"room1","name":"peerB","port":5000}
+{"type":"REGISTER","namespace":"room2","name":"peerC","port":6000,"ttl":120}
+{"type":"REGISTER","namespace":"","name":"badPeer","port":1234}
+{"type":"REGISTER","namespace":"room1","name":"badPort","port":99999}
+{"type":"DISCOVER","namespace":"room1"}
+{"type":"DISCOVER","namespace":"room2"}
+{"type":"DISCOVER"}
+{"type":"UNREGISTER","namespace":"room1"}
+{"type":"UNREGISTER","namespace":"room2"}
+{"type":"INVALIDCMD"}
+{"foo":"bar"}
+{"type":"REGISTER"}
+{"type":"DISCOVER","namespace":123}

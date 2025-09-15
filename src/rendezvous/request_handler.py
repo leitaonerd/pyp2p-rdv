@@ -1,6 +1,9 @@
 import json
 from models import PeerRecord
 from datetime import datetime, timezone
+import logging
+
+log = logging.getLogger("Handler")
 
 class RequestHandler:
     def __init__(self, peer_db):
@@ -16,14 +19,21 @@ class RequestHandler:
             port = request.args.get("port")
             ttl = request.args.get("ttl", 7200)
             
+            log.info(
+                "REGISTER from ip=%s obs_port=%s ns=%r name=%r port=%r ttl=%r",
+                client_ip, observed_port, namespace, name, port, ttl
+            )
+            
             #lets validate required fields
             if not isinstance(namespace, str) or not namespace or len(namespace) > 64:
+                log.warning("REGISTER invalid (namespace)")
                 return json.dumps({"status": "ERROR", "error": "bad_namespace"})
             try:
                 port = int(port)
                 if not (1 <= port <= 65535):
                     raise ValueError()
             except (ValueError, TypeError):
+                log.warning("REGISTER invalid (port)")
                 return json.dumps({"status": "ERROR", "error": "bad_port"})
             
             try:
@@ -38,6 +48,9 @@ class RequestHandler:
                     observed_port=observed_port
                 )
                 self.peer_db.add_peer(peer)
+                
+                log.info("REGISTER OK: %s:%d ns=%s ttl=%d", peer.ip, peer.port, peer.namespace, peer.ttl)
+                
                 return json.dumps({
                     "status": "OK",
                     "ttl": peer.ttl,
@@ -46,7 +59,9 @@ class RequestHandler:
                 })  
                           
             except Exception as e:
+                log.exception("REGISTER failed")
                 return json.dumps({"status": "ERROR", "message": str(e)})
+
             
         elif cmd == "DISCOVER":
             namespace = args.get("namespace")
@@ -58,9 +73,11 @@ class RequestHandler:
                 "name": p.name,
                 "namespace": p.namespace,
                 "ttl": p.ttl,
-                "observed_ip": p.observed_ip,             # << novo
-                "observed_port": p.observed_port          # << novo
+                "observed_ip": p.observed_ip,
+                "observed_port": p.observed_port
             } for p in peers]
+            
+            log.info("DISCOVER ns=%r -> %d peer(s)", namespace, len(peer_list)) 
             
             return json.dumps({"status": "OK", "peers": peer_list})
         
@@ -68,10 +85,15 @@ class RequestHandler:
             try:
                 namespace = args.get("namespace")
                 self.peer_db.remove_peer(client_ip, namespace)
+                
+                log.info("UNREGISTER ip=%s ns=%r OK", client_ip, namespace)
+
                 return json.dumps({"status": "OK"})
             
             except Exception as e:
+                log.exception("UNREGISTER failed")
                 return json.dumps({"status": "ERROR", "message": str(e)})
 
+        log.warning("Unknown command: %s", cmd)
         return json.dumps({"status": "ERROR", "message": "Unknown command"})    
 
