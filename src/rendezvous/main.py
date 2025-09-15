@@ -61,15 +61,3 @@ if __name__ == "__main__":
 
     server = RendezvousServer()
     server.start()
-
-
-#if __name__ == "__main__":
-#    logging.basicConfig(              
-#        level=logging.INFO,           
-#       format="%(asctime)s.%(msecs)03d %(levelname)s [%(threadName)s] %(name)s: %(message)s",  # << ADDED
-#       datefmt="%Y-%m-%d %H:%M:%S",  
-#       force=True,                   
-#    )
-    
-#    server = RendezvousServer()
-#    server.start()
