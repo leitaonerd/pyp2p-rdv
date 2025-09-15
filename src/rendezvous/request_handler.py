@@ -24,6 +24,16 @@ class RequestHandler:
                 client_ip, observed_port, namespace, name, port, ttl
             )
             
+            
+            # TTL clamp (1 .. 86400)
+            try:
+                ttl = int(ttl)
+                if ttl < 1 or ttl > 86400:
+                    ttl = max(1, min(ttl, 86400))
+            except (ValueError, TypeError):
+                log.warning("REGISTER invalid (ttl)")
+                return json.dumps({"status": "ERROR", "error": "bad_ttl"})
+            
             #lets validate required fields
             if not isinstance(namespace, str) or not namespace or len(namespace) > 64:
                 log.warning("REGISTER invalid (namespace)")
@@ -42,7 +52,7 @@ class RequestHandler:
                     port=int(args.get("port")),
                     name=args.get("name"),
                     namespace=args["namespace"],
-                    ttl=int(args.get("ttl", 7200)),
+                    ttl=ttl,
                     timestamp=datetime.now(timezone.utc),
                     observed_ip=client_ip,
                     observed_port=observed_port
