@@ -37,7 +37,7 @@ def setup_logging(mode: str, logfile: str | None):
         fh = logging.FileHandler(logfile, mode="a", encoding="utf-8")
         fh.setFormatter(fmt)
         handlers.append(fh)
-
+        
     for h in handlers:
         root.addHandler(h)
 
@@ -55,9 +55,24 @@ if __name__ == "__main__":
         default="server.log",
         help="Log file path when using modes 'file' or 'both' (default: server.log).",
     )
+    
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="0.0.0.0",
+        help="Host/IP for the rendezvous server (default: 0.0.0.0).",
+    )
+    
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=5000,
+        help="Port for the rendezvous server (default: 5000).",
+    )
+    
     args = parser.parse_args()
 
     setup_logging(args.log_mode, args.log_file)
-
-    server = RendezvousServer()
+    
+    server = RendezvousServer(args.host, args.port)
     server.start()

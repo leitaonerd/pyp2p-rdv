@@ -1,172 +1,161 @@
 #!/usr/bin/env python3
-import argparse
-import json
-import re
-import socket
-import time
-from typing import Any, Dict, List, Optional, Tuple
+import argparse, json, socket, time, re, sys
+from typing import Any, Dict
 
-# ---------- Networking ----------
-
-def send_and_recv_once(host: str, port: int, payload: str, timeout: float = 5.0) -> Tuple[float, str]:
-    start = time.time()
-    buf = bytearray()
-    with socket.create_connection((host, port), timeout=timeout) as s:
-        s.settimeout(timeout)
-        s.sendall(payload.encode("utf-8") + b"\n")  # sempre 1 linha por request
-        while True:
-            try:
-                chunk = s.recv(4096)
-                if not chunk:
-                    break
-                buf.extend(chunk)
-            except socket.timeout:
-                break
-    elapsed = time.time() - start
-    return elapsed, buf.decode("utf-8", errors="replace").rstrip("\r\n")
-
-# ---------- Helpers ----------
-
-def json_compact(obj: Any) -> str:
-    return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
-
-def load_cases(path: str) -> List[Dict[str, Any]]:    
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-        
-    if not isinstance(data, list):
-        raise ValueError("Test file must be a JSON array of cases.")
-    for i, case in enumerate(data, 1):
-        if not isinstance(case, dict) or "send" not in case or "expect" not in case:
-            if "send" not in case and "synth" in case:
-                continue
-            
-            raise ValueError(f"Case {i} must be an object with 'send' and 'expect'.")
-    return data
-
-def match_subset(resp: Any, subset: Any) -> bool:
-    if isinstance(subset, dict):
-        if not isinstance(resp, dict):
-            return False
-        return all(k in resp and match_subset(resp[k], v) for k, v in subset.items())
-    if isinstance(subset, list):
-        if not isinstance(resp, list):
-            return False
-        # cada item esperado deve estar contido em algum item da resposta
-        return all(any(match_subset(r_item, exp_item) for r_item in resp) for exp_item in subset)
-    return resp == subset
-
-def top_level_has_keys(j: Dict[str, Any], keys: List[str]) -> bool:
-    return all(k in j for k in keys)
-
-def type_of_fields(j: Dict[str, Any], types: Dict[str, str]) -> bool:
-    mapping = {"str": str, "int": int, "list": list, "dict": dict, "float": float, "number": (int, float), "bool": bool}
-    for k, tname in types.items():
-        if k not in j: return False
-        py_t = mapping.get(tname)
-        if py_t is None or not isinstance(j[k], py_t): return False
-    return True
-
-def validate_response(raw_resp: str, expect: Dict[str, Any]) -> Tuple[bool, str]:
-    # regex no raw
-    if "regex" in expect:
-        pat = expect["regex"]
-        if not re.search(pat, raw_resp):
-            return False, f"regex '{pat}' not matched"
-    # tenta JSON
-    j = None
-    try:
-        j = json.loads(raw_resp)
-    except Exception:
-        j = None
-
-    if "equals" in expect:
-        if j is None: return False, "expected JSON equals but got non-JSON"
-        if j != expect["equals"]: return False, "JSON is not equal to expected"
-    if "subset" in expect:
-        if j is None: return False, "expected JSON subset but got non-JSON"
-        if not match_subset(j, expect["subset"]): return False, "JSON does not include expected subset"
-    if "has" in expect:
-        if j is None: return False, "expected JSON but got non-JSON"
-        if not top_level_has_keys(j, expect["has"]): return False, f"JSON missing keys: {expect['has']}"
-    if "types" in expect:
-        if j is None: return False, "expected JSON but got non-JSON"
-        if not type_of_fields(j, expect["types"]): return False, f"JSON type check failed for: {expect['types']}"
-    if "status" in expect:
-        if j is None: return False, "expected JSON status but got non-JSON"
-        if j.get("status") != expect["status"]: return False, f"status={j.get('status')} != {expect['status']}"
-    return True, "OK"
-
-# ---------- Wire payload builder ----------
-
-def build_payload(case: Dict[str, Any]) -> str:
-    """
-    mode:
-      - "json" (default): serializa 'send' como JSON compacto
-      - "raw": envia 'send' como string literal
-      - "synth": gera payload sintético (ex.: muito longo) com 'synth' config
-    """
+def build_line(case: Dict[str, Any]) -> bytes:
     mode = case.get("mode", "json")
-
     if mode == "json":
-        return json_compact(case["send"])
+        payload = case["send"]
+        # JSON compacto por padrão (uma linha)
+        line = json.dumps(payload, separators=(",", ":"))
     elif mode == "raw":
-        return str(case.get("send") or "")
+        line = case.get("send", "")
+        if not isinstance(line, str):
+            line = str(line)
     elif mode == "synth":
-        cfg = case.get("synth", {})
-        # exemplo suportado: {"pattern":"curly_a", "count":33000}
-        pat = cfg.get("pattern")
+        cfg = case.get("synth", {}) or {}
+        pat = cfg.get("pattern", "curly_a")
+        count = int(cfg.get("count", 0))
         if pat == "curly_a":
-            count = int(cfg.get("count", 33000))
-            return "{" + ("a" * count) + "}"
-        raise ValueError(f"Unknown synth pattern: {pat}")
+            # Ex: "{" + "a"*33000 + "}" -> invalida propositalmente p/ testar limite
+            line = "{" + ("a" * count) + "}"
+        elif pat == "whitespace":
+            line = " " * count
+        else:
+            raise ValueError(f"Unknown synth pattern: {pat}")
     else:
         raise ValueError(f"Unknown mode: {mode}")
+    return (line + "\n").encode("utf-8", errors="replace")
 
-# ---------- Runner ----------
+def recv_line(sock: socket.socket, timeout: float) -> str:
+    sock.settimeout(timeout)
+    buf = b""
+    while True:
+        chunk = sock.recv(4096)
+        if not chunk:
+            break
+        buf += chunk
+        if b"\n" in buf:
+            line, _ = buf.split(b"\n", 1)
+            return line.decode("utf-8", errors="replace")
+    # EOF sem newline: devolve tudo que tiver
+    return buf.decode("utf-8", errors="replace")
+
+def is_subset(expected: Any, got: Any) -> bool:
+    if isinstance(expected, dict):
+        if not isinstance(got, dict):
+            return False
+        for k, v in expected.items():
+            if k not in got or not is_subset(v, got[k]):
+                return False
+        return True
+    if isinstance(expected, list):
+        if not isinstance(got, list) or len(expected) > len(got):
+            return False
+        # Subconjunto “posicional” simples
+        return all(is_subset(e, g) for e, g in zip(expected, got))
+    return expected == got
+
+def check_types(type_spec: Dict[str, str], got_obj: Dict[str, Any]) -> bool:
+    mp = {"int": int, "str": str, "list": list, "dict": dict, "float": float, "bool": bool}
+    for k, tname in type_spec.items():
+        if k not in got_obj:
+            return False
+        py = mp.get(tname)
+        if py is None or not isinstance(got_obj[k], py):
+            return False
+    return True
+
+def run_case(case: Dict[str, Any], host: str, port: int, timeout: float, default_delay: float) -> bool:
+    name = case.get("name", "<no-name>")
+    delay = float(case.get("delay", default_delay or 0))
+    if delay > 0:
+        time.sleep(delay)
+
+    try:
+        payload = build_line(case)
+    except Exception as e:
+        print(f"[{name}] BUILD ERROR: {e}")
+        return False
+
+    resp_text = ""
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            sock.sendall(payload)
+            resp_text = recv_line(sock, timeout)
+    except (ConnectionRefusedError, TimeoutError, socket.timeout) as e:
+        print(f"[{name}] NET ERROR: {e}")
+        return False
+    except Exception as e:
+        print(f"[{name}] UNEXPECTED ERROR: {e}")
+        return False
+
+    exp = case.get("expect", {})
+    ok = True
+
+    # 1) Checagem de regex (sobre texto bruto)
+    if "regex" in exp:
+        if not re.search(exp["regex"], resp_text, flags=re.S):
+            print(f"[{name}] FAIL regex: {exp['regex']}\n  got: {resp_text}")
+            ok = False
+
+    # 2) Parse JSON (se der)
+    got_obj = None
+    try:
+        got_obj = json.loads(resp_text)
+    except Exception:
+        pass
+
+    # 3) Checagens estruturais
+    if "status" in exp and got_obj is not None:
+        if got_obj.get("status") != exp["status"]:
+            print(f"[{name}] FAIL status: expected {exp['status']}, got {got_obj.get('status')}; raw={resp_text}")
+            ok = False
+
+    if "equals" in exp and got_obj is not None:
+        if got_obj != exp["equals"]:
+            print(f"[{name}] FAIL equals:\n  expected={json.dumps(exp['equals'])}\n  got     ={resp_text}")
+            ok = False
+
+    if "subset" in exp and got_obj is not None:
+        if not is_subset(exp["subset"], got_obj):
+            print(f"[{name}] FAIL subset:\n  expected⊆got {json.dumps(exp['subset'])}\n  got={resp_text}")
+            ok = False
+
+    if "has" in exp and got_obj is not None:
+        for key in exp["has"]:
+            if key not in got_obj:
+                print(f"[{name}] FAIL has: missing key '{key}' in {resp_text}")
+                ok = False
+
+    if "types" in exp and got_obj is not None:
+        if not check_types(exp["types"], got_obj):
+            print(f"[{name}] FAIL types: spec={exp['types']} got={resp_text}")
+            ok = False
+
+    if ok:
+        print(f"[{name}] OK")
+    return ok
 
 def main():
-    ap = argparse.ArgumentParser(description="Rendezvous server tester (readable JSON with expected responses).")
-    ap.add_argument("file", help="Path to JSON array of test cases.")
-    ap.add_argument("--host", default="127.0.0.1", help="Server host (default: 127.0.0.1)")
-    ap.add_argument("--port", type=int, default=5000, help="Server port (default: 5000)")
-    ap.add_argument("--timeout", type=float, default=5.0, help="Socket timeout (seconds)")
-    ap.add_argument("--delay", type=float, default=0.0, help="Delay between cases (seconds)")
+    ap = argparse.ArgumentParser(description="Rendezvous JSON line tester")
+    ap.add_argument("test_file", help="Path to JSON test sequence file")
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=5000)
+    ap.add_argument("--timeout", type=float, default=5.0, help="Socket connect/read timeout seconds")
+    ap.add_argument("--delay", type=float, default=0.0, help="Default delay (seconds) before each case (can be overridden per-case)")
     args = ap.parse_args()
 
-    cases = load_cases(args.file)
+    with open(args.test_file, "r", encoding="utf-8") as f:
+        cases = json.load(f)
 
-    total = passed = failed = 0
-    for i, case in enumerate(cases, start=1):
-        name = case.get("name") or f"case-{i}"
-        expect = case.get("expect", {})
-        payload = build_payload(case)
-
-        total += 1
-        print(f"\n[{i}] {name}\n➜ Sending: {payload if len(payload)<=200 else payload[:200]+'…'}")
-
-        try:
-            t, resp = send_and_recv_once(args.host, args.port, payload, timeout=args.timeout)
-            print(f"⇦ Received ({t*1000:.1f} ms): {resp if len(resp)<=300 else resp[:300]+'…'}")
-        except Exception as e:
-            print(f"✖ Connection error: {e}")
-            failed += 1
-            if args.delay: time.sleep(args.delay)
-            continue
-
-        ok, why = validate_response(resp, expect)
-        if ok:
-            print("✔ PASS")
-            passed += 1
-        else:
-            print(f"✖ FAIL: {why}")
-            failed += 1
-
-        if args.delay:
-            time.sleep(args.delay)
-
-    print("\n==== Summary ====")
-    print(f"Total: {total} | Passed: {passed} | Failed: {failed}")
+    passed = 0
+    for case in cases:
+        ok = run_case(case, args.host, args.port, args.timeout, args.delay)
+        if ok: passed += 1
+    total = len(cases)
+    print(f"\nSummary: {passed}/{total} passed")
+    sys.exit(0 if passed == total else 1)
 
 if __name__ == "__main__":
     main()
