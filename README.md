@@ -43,16 +43,17 @@ Registra (ou atualiza) um peer no servidor.
 
 **Exemplo de requisição:**
 ```json
-{ "status":"ERROR", "error":"line_too_long", "limit":32768 }
+{ "type": "REGISTER", "namespace": "UnB", "name": "alice", "port": 4000, "ttl": 3600 }
 ```
 
-**Sem rota (camada P2P)**  
+**Resposta de sucesso:**
 ```json
-{ "type":"ERROR", "code":"no_route", "ref":"m123", "detail":"carol@UnB not reachable" }
+{ "status": "OK" }
 ```
 
 **Possíveis erros:**
 ```json
+{ "status":"ERROR", "error":"line_too_long", "limit":32768 }
 { "status": "ERROR", "error": "bad_name" }
 { "status": "ERROR", "error": "bad_namespace" }
 { "status": "ERROR", "error": "bad_port" }
@@ -97,7 +98,7 @@ Retorna a lista de peers registrados em um namespace.
 
 **Requisição para `namespace` inexistente**
 ```json
-{ "type": "DISCOVER", "namespace": "room1" }
+{ "type": "DISCOVER", "namespace": "know-without-study" }
 ```
 
 **Resposta:**
