@@ -57,12 +57,33 @@ Registra (ou atualiza) um peer no servidor.
 ```
 
 **Possíveis erros:**
+
+Seguem alguns exemplo possíveis de erros retornados pelo servidor para requisições `REGISTER` inválidas:
+
+- Quando o valor do campo `name` é inválido (> 64 ou 0 caracteres):
+
 ```json
-{ "status":"ERROR", "message":"line_too_long", "limit":32768 }
 { "status": "ERROR", "message": "bad_name" }
+```
+
+- Quando o valor do campo `namespace` é inválido (> 64 ou 0 caracteres):
+
+```json
 { "status": "ERROR", "message": "bad_namespace" }
-{ "status": "ERROR", "message": "bad_port" }
+```
+
+- Quando o valor do campo `ttl` não é um inteiro.
+
+```json
 { "status": "ERROR", "message": "bad_ttl" }
+```
+
+> **Obs:** O valor do campo `ttl` deve estar entre 1 e 86400 (24 horas). Valores fora desse intervalo, o servidor assume `max(1, min(ttl, 86400))` e não retorna erro.
+
+- Quando o valor do campo `port` é inválido (> 65535 ou < 1):
+
+```json
+{ "status": "ERROR", "message": "bad_port" }
 ```
 
 ---
@@ -144,6 +165,24 @@ Retorna a lista de peers registrados em um *namespace*. O servidor **apenas resp
 {"status": "OK", "peers": []}
 ```
 
+**Erros possíveis:**
+
+Seguem alguns exemplo possíveis de erros retornados pelo servidor para requisições `DISCOVER` inválidas:
+
+- Quando o valor do campo `namespace` é inválido (> 64 ou 0 caracteres):
+
+```json
+{ "status": "ERROR", "message": "bad_namespace" }
+```
+
+- Quando o *peer* que fez a requisição (`IP`) não está registrado:
+
+```json
+{ "status": "ERROR", "message": "peer_not_registered" }
+```
+
+> **Obs:** Não é possível desregistrar um *peer* que não está registrado.
+
 ---
 
 ##### 3. `UNREGISTER`
@@ -170,7 +209,7 @@ Remove *peers* previamente registrados. O servidor **apenas responde** às requi
 
 **Erros possíveis:**
 
-Seguem alguns exemplo possíveis de erros retornados pelo servidor:
+Seguem alguns exemplo possíveis de erros retornados pelo servidor para requisições `UNREGISTER` inválidas:
 
 - Quando o valor do campo `port` não é um inteiro válido ou está fora do intervalo 1-65535:
 
@@ -178,7 +217,7 @@ Seguem alguns exemplo possíveis de erros retornados pelo servidor:
 { "status": "ERROR", "message": "bad_port (abc)" }
 ```
 
-- Quando o valor do campo `namespace` é inválido (> 64 caracteres):
+- Quando o valor do campo `namespace` é inválido (> 64 ou 0 caracteres):
 
 ```json
 { "status": "ERROR", "message": "bad_namespace" }
@@ -228,10 +267,13 @@ Para evitar abusos, o servidor impõe as seguintes restrições:
 }
 ```
 
+- É obrigatório fazer o registro antes de usar DISCOVER ou UNREGISTER. Caso contrário, o servidor responde com erro e fecha a conexão. Quando o *peer* que fez a requisição (`IP`) não está registrado:
 
+```json
+{ "status": "ERROR", "message": "peer_not_registered" }
+```
 
-- É obrigatório fazer o registro antes de usar DISCOVER ou UNREGISTER. Caso contrário, o servidor responde com erro e fecha a conexão.
-
+---
 
 ##### 5. Mensagens de Erro Genéricas
 

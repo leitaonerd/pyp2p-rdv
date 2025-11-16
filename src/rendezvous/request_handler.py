@@ -81,9 +81,15 @@ class RequestHandler:
             
             if not self.peer_db.is_ip_registered(client_ip):
                 log.info("DISCOVER client should register first: %s", client_ip)
-                return json.dumps({"status": "ERROR", "message": "Request denied: peer not registered."})
+                return json.dumps({"status": "ERROR", "message": "peer_not_registered"})
             
             namespace = args.get("namespace")
+            
+            if namespace is not None and not (1 <= len(namespace) <= 64):
+                    log.warning("UNREGISTER invalid (namespace:%r)", namespace)
+                    return json.dumps({"status": "ERROR", "message": "bad_namespace"})
+            
+            
             peers = self.peer_db.get_peers(namespace)
             now = datetime.now(timezone.utc)
             
@@ -117,7 +123,7 @@ class RequestHandler:
                     log.warning("UNREGISTER invalid (namespace)")
                     return json.dumps({"status": "ERROR", "message": "namespace_required"})
                 
-                if namespace and len(namespace) > 64:
+                if namespace is not None and not (1 <= len(namespace) <= 64):
                     log.warning("UNREGISTER invalid (namespace:%r)", namespace)
                     return json.dumps({"status": "ERROR", "message": "bad_namespace"})
                 
