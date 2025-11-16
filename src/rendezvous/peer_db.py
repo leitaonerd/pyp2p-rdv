@@ -150,6 +150,9 @@ class PeerDatabase:
             
             # Persist under the same lock to keep file and memory in sync.
             self._save_locked()
+            
+            # return True if any peer was removed
+            return removed > 0 
 
         
 

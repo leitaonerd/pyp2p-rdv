@@ -102,13 +102,20 @@ class RequestHandler:
         
         elif cmd == "UNREGISTER":
             try:
-                if not self.peer_db.is_ip_registered(client_ip):
+                
+                ip_registered = self.peer_db.is_ip_registered(client_ip)
+                
+                if not ip_registered:
                     log.info("UNREGISTER client should register first: %s", client_ip)
-                    return json.dumps({"status": "ERROR", "message": "Request denied: peer not registered."})
+                    return json.dumps({"status": "ERROR", "message": "peer_not_registered"})
                 
                 namespace = args.get("namespace")
                 name = args.get("name")
                 port = args.get("port")
+                
+                if namespace is None:
+                    log.warning("UNREGISTER invalid (namespace)")
+                    return json.dumps({"status": "ERROR", "message": "namespace_required"})
                 
                 if port is not None:
                     try:
@@ -117,12 +124,21 @@ class RequestHandler:
                         log.warning(f"UNREGISTER invalid (port:{port})")
                         return json.dumps({"status": "ERROR", "message": f"bad_port ({port})"})
                     
-                self.peer_db.remove_peer(client_ip, namespace, name=name, port=port)
+                removed = self.peer_db.remove_peer(client_ip, namespace, name=name, port=port)
                 
-                log.info("UNREGISTER ip=%s ns=%r name=%r port=%r OK", 
-                         client_ip, namespace, name, port)
+                if not removed and ip_registered:
+                    log.info("UNREGISTER ip=%s ns=%r name=%r port=%r NOT FOUND", 
+                             client_ip, namespace, name, port)
+                    return json.dumps({"status": "ERROR", "message": "peer_credentials_do_not_match"})
+                elif not removed:
+                    log.info("UNREGISTER ip=%s ns=%r name=%r port=%r NOT FOUND", 
+                             client_ip, namespace, name, port)
+                    return json.dumps({"status": "ERROR", "message": "peer_not_registered"})
+                else:
+                    log.info("UNREGISTER ip=%s ns=%r name=%r port=%r OK", 
+                                client_ip, namespace, name, port)
 
-                return json.dumps({"status": "OK"})
+                    return json.dumps({"status": "OK"})
             
             except Exception as e:
                 log.exception("UNREGISTER failed")
