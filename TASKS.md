@@ -128,10 +128,18 @@ Este documento organiza as tarefas necessárias para implementar o cliente de ch
 - Sincronização entre threads/async (evitar race conditions na `PeerTable`).
 
 ### Próximos Passos Recomendados
-1. Implementar módulo de configuração + registro no rendezvous.
-2. Criar infraestrutura de conexão TCP com handshake HELLO/HELLO_OK.
-3. Evoluir CLI e roteador de mensagens em cima da infraestrutura.
-4. Finalizar com observabilidade, testes e documentação.
+1. Consolidar gestão de conexões TCP: reaproveitar `PeerConnection` para discagens outbound, reconciliar com a `PeerTable` (limites, retries) e implementar PING/PONG + backoff.
+2. Evoluir o `MessageRouter` + CLI: comandos `/msg`, `/pub`, `/conn`, `/rtt`, `/reconnect` enviando mensagens reais (SEND/ACK, PUB) e apresentando feedback em tempo real.
+3. Implementar encerramento controlado (BYE/BYE_OK) e automações de reconexão, além de registrar métricas básicas (RTT, mensagens por peer) expostas na CLI/logs.
+4. Cobrir com testes (unitários + scripts em `tools/`), atualizar README/guia de operação e preparar checklists finais da RC202502.
+
+### Funcionalidades Ainda Não Implementadas
+- PING/PONG periódico com cálculo de RTT e marcação automática de peers `STALE`.
+- Fluxo completo de envio/roteamento de SEND/ACK e PUB (incluindo geração de `msg_id`, filas de saída e tratamento de timeouts).
+- CLI interativa com todos os comandos descritos na especificação (`/msg`, `/pub`, `/conn`, `/rtt`, `/reconnect`, `/log`, `/quit`).
+- BYE/BYE_OK e encerramento gracioso por peer, com limpeza coordenada das conexões.
+- Reconexão automática com política de backoff e limites configuráveis.
+- Observabilidade expandida: logs estruturados, métricas em tempo real e histórico de mensagens para depuração.
 
 ### Notas rápidas
 - O servidor Rendezvous é fornecido pronto pelo professor; manter foco apenas no cliente (registro, discovery e conexões diretas).
@@ -141,3 +149,4 @@ Este documento organiza as tarefas necessárias para implementar o cliente de ch
 - **2025-11-17 (Iteração 2)**: Implementados carregamento de configuração via JSON (`ClientSettings`), cliente de rendezvous com REGISTER/DISCOVER/UNREGISTER reais e integração no `P2PClient` (registro, descoberta inicial e shutdown limpo com tratamento de erros).
 - **2025-11-17 (Iteração 3)**: Adicionados worker de descoberta periódica (thread dedicada) e saneamento da `PeerTable` (`mark_missing_as_stale`). `P2PClient` agora mantém sincronização contínua com o rendezvous e protege contra peers obsoletos.
 - **2025-11-17 (Iteração 4)**: Criado `PeerServer` (listener TCP) com handshake HELLO/HELLO_OK básico e integração ao `P2PClient`. Servidor abre na porta configurada antes do REGISTER e encerra no shutdown. As conexões ainda são encerradas após o handshake; próxima etapa manterá os sockets para troca de mensagens.
+- **2025-11-17 (Iteração 5)**: Implementado `PeerConnection` com handshake HELLO/HELLO_OK persistente, leitura contínua e envio JSON. `PeerServer` agora transfere o socket aceito para o `P2PClient`, que cria/gerencia instâncias de `PeerConnection`, registra callbacks de mensagem/fechamento e encerra todas as conexões durante o shutdown.

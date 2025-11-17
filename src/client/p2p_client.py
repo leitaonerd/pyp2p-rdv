@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import logging
+import socket
 import threading
-from typing import Optional
+from typing import Dict, Optional
 
 from .cli import CommandLineInterface
 from .config import ClientSettings
 from .keep_alive import KeepAliveManager
 from .message_router import MessageRouter
+from .peer_connection import PeerConnection
 from .peer_server import PeerServer
 from .peer_table import PeerTable
 from .rendezvous_connection import RendezvousClient, RendezvousError
@@ -29,7 +31,8 @@ class P2PClient:
         self.router = MessageRouter(self.peer_table, self.state)
         self.keep_alive = KeepAliveManager(self.settings, self.peer_table)
         self.cli = CommandLineInterface(self.router, self.peer_table)
-        self.peer_server = PeerServer(self.settings, self.peer_table, self.register_inbound_peer)
+        self.connections: Dict[str, PeerConnection] = {}
+        self.peer_server = PeerServer(self.settings, self.peer_table, self._handle_inbound_socket)
         self._running = False
         self._discovery_thread: Optional[threading.Thread] = None
         self._discovery_stop = threading.Event()
@@ -76,6 +79,9 @@ class P2PClient:
             return
         logger.info("Encerrando cliente PyP2P...")
         self._stop_discovery_worker()
+        for connection in list(self.connections.values()):
+            connection.close()
+        self.connections.clear()
         self.peer_server.stop()
         self.keep_alive.stop()
         self.cli.stop()
@@ -104,11 +110,26 @@ class P2PClient:
             self.peer_table.mark_missing_as_stale(seen_ids, stale_after=self.settings.discovery_interval * 2)
         logger.debug("PeerTable sincronizada: %s", self.peer_table.stats())
 
-    def register_inbound_peer(self, peer: PeerInfo) -> None:
-        """Hook para quando o servidor TCP aceitar conexão inbound."""
+    def _handle_inbound_socket(self, peer: PeerInfo, conn: socket.socket) -> None:
+        """Recebe socket aceito pelo PeerServer e inicia o PeerConnection."""
 
         self.peer_table.upsert_peer(peer)
-        # TODO: integrar com MessageRouter/CLI para avisar usuário.
+        connection = PeerConnection.from_inbound(
+            self.settings,
+            peer,
+            conn,
+            on_message=self._on_connection_message,
+            on_closed=self._on_connection_closed,
+        )
+        self.connections[peer.peer_id] = connection
+        connection.start_reader()
+
+    def _on_connection_message(self, connection: PeerConnection, message: dict) -> None:
+        self.router.handle_incoming(message)
+
+    def _on_connection_closed(self, connection: PeerConnection) -> None:
+        self.connections.pop(connection.peer.peer_id, None)
+        self.peer_table.mark_stale(connection.peer.peer_id)
 
     def _start_discovery_worker(self) -> None:
         if self._discovery_thread and self._discovery_thread.is_alive():

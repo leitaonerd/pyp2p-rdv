@@ -5,7 +5,6 @@ import json
 import logging
 import socket
 import threading
-from contextlib import closing
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
@@ -25,7 +24,7 @@ class PeerServer:
         self,
         settings: ClientSettings,
         peer_table: PeerTable,
-        on_peer_connected: Callable[[PeerInfo], None],
+    on_peer_connected: Callable[[PeerInfo, socket.socket], None],
     ) -> None:
         self.settings = settings
         self.peer_table = peer_table
@@ -116,7 +115,6 @@ class PeerServer:
             features=list(payload.get("features", [])),
         )
         self.peer_table.upsert_peer(peer_info)
-        self.on_peer_connected(peer_info)
 
         response = {
             "type": "HELLO_OK",
@@ -129,9 +127,15 @@ class PeerServer:
             conn.sendall(json.dumps(response, separators=(",", ":")).encode("utf-8") + b"\n")
         except OSError:
             logger.debug("[%s] Falha ao enviar HELLO_OK", peer)
-        finally:
             conn.close()
+            return
+
+        try:
+            self.on_peer_connected(peer_info, conn)
             logger.info("[%s] Handshake HELLO concluído", peer)
+        except Exception:
+            logger.exception("[%s] Erro ao registrar conexão; fechando socket", peer)
+            conn.close()
 
     def _recv_line(self, conn: socket.socket) -> str:
         conn.settimeout(self.settings.extra.get("peer_handshake_timeout", 5.0))
