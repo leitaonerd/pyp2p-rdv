@@ -90,18 +90,30 @@ class PeerConnection:
         def _loop() -> None:
             try:
                 while not self._stop_event.is_set():
-                    line = self._recv_line()
-                    if not line:
-                        break
                     try:
-                        message = json.loads(line)
-                    except json.JSONDecodeError:
-                        logger.warning("[%s] mensagem inválida recebida: %s", self.peer.peer_id, line)
+                        line = self._recv_line()
+                        if not line:
+                            # Empty line or connection closed
+                            if self._stop_event.is_set():
+                                break
+                            continue
+                        try:
+                            message = json.loads(line)
+                        except json.JSONDecodeError:
+                            logger.warning("[%s] mensagem inválida recebida: %s", self.peer.peer_id, line)
+                            continue
+                        if self._handle_control_message(message):
+                            continue
+                        if self._on_message:
+                            self._on_message(self, message)
+                    except socket.timeout:
+                        # Timeout is normal - just continue waiting for data
                         continue
-                    if self._handle_control_message(message):
-                        continue
-                    if self._on_message:
-                        self._on_message(self, message)
+                    except OSError as e:
+                        if self._stop_event.is_set():
+                            break
+                        logger.debug("[%s] Erro de socket: %s", self.peer.peer_id, e)
+                        break
             finally:
                 self.close()
 
@@ -205,7 +217,8 @@ class PeerConnection:
 
     def _recv_line(self) -> str:
         buf = b""
-        self.socket.settimeout(self.settings.extra.get("peer_read_timeout", 10.0))
+        # Timeout should be longer than ping interval (30s) to avoid false timeouts
+        self.socket.settimeout(self.settings.extra.get("peer_read_timeout", 60.0))
         while True:
             chunk = self.socket.recv(4096)
             if not chunk:

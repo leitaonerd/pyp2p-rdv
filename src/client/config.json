@@ -1,0 +1,7 @@
+{
+    "name": "rafael",
+    "namespace": "CIC",
+    "rendezvous_host": "pyp2p.mfcaetano.cc",
+    "rendezvous_port": 8080,
+    "listen_port": 6000
+}

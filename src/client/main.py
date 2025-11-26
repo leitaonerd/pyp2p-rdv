@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import argparse
 import logging
+import signal
+import sys
+import threading
 from pathlib import Path
 
 from .config import ClientSettings
@@ -34,8 +37,29 @@ def main() -> None:
     configure_logging(settings.log_level)
     client = P2PClient(settings)
 
+    # Event to signal shutdown
+    shutdown_event = threading.Event()
+
+    def signal_handler(sig, frame):
+        print("\nRecebido sinal de interrupção. Encerrando...")
+        shutdown_event.set()
+
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
     try:
         client.start()
+        print(f"\nCliente P2P iniciado como {settings.peer_id}")
+        print("Digite /help para ver os comandos disponíveis.\n")
+        
+        # Wait until shutdown is signaled or CLI thread ends
+        while not shutdown_event.is_set() and client._running:
+            # Check if CLI thread is still alive
+            if client.cli._thread and not client.cli._thread.is_alive():
+                break
+            shutdown_event.wait(timeout=0.5)
+            
     except KeyboardInterrupt:
         pass
     finally:
