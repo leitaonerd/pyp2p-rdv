@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import socket
 import threading
+import time
 from typing import Dict, Optional
 
 from .cli import CommandLineInterface
@@ -30,7 +31,7 @@ class P2PClient:
         self.rendezvous = RendezvousClient(self.settings)
         self.router = MessageRouter(self.peer_table, self.state)
         self.keep_alive = KeepAliveManager(self.settings, self.peer_table)
-        self.cli = CommandLineInterface(self.router, self.peer_table)
+        self.cli = CommandLineInterface(self.router, self.peer_table, p2p_client=self)
         self.connections: Dict[str, PeerConnection] = {}
         self.peer_server = PeerServer(self.settings, self.peer_table, self._handle_inbound_socket)
         self._running = False
@@ -149,3 +150,74 @@ class P2PClient:
         self._discovery_stop.set()
         self._discovery_thread.join(timeout=2)
         self._discovery_thread = None
+
+    def connect_to_peer(self, peer: PeerInfo) -> bool:
+        """Estabelece conexão outbound com peer"""
+        if peer.peer_id in self.connections:
+            logger.debug("Já conectado a %s", peer.peer_id)
+            return True
+        
+        try:
+            connection = PeerConnection.connect_outbound(self.settings, peer,
+            on_message=self._on_connection_message, on_closed=self._on_connection_closed)
+
+            self.connections[peer.peer_id] = connection
+            connection.start_reader()
+
+            logger.info("Conectado outbound com %s", peer.peer_id)
+            return True
+        except Exception as exc:
+            logger.warning("Falha ao conectar com %s: %s", peer.peer_id, exc)
+            return False
+        
+    def reconcile_peer_connections(self) -> None:
+        """Tenta conectar com peers descobertos que não estão conectados"""
+        known_peers = self.peer_table.all()
+        connected_count = 0
+        attempted_count = 0
+
+        for peer in known_peers:
+            if(peer.peer_id != self.settings.peer_id and peer.status in ["FRESH", "STALE"] and
+               hasattr(peer, "address") and peer.address and hasattr(peer, "port") and peer.port):
+                
+                last_attempt = getattr(peer, "last_connection_attempt", 0)
+                if time.time() - last_attempt < 30:
+                    continue
+                logger.debug("Tentando conectar com %s (%s%s)", peer.peer_id, peer.address, peer.port)
+                attempted_count += 1
+
+                peer.last_connection_attempt = time.time()
+                self.peer_table.upsert_peer(peer)
+
+                if self.connect_to_peer(peer):
+                    connected_count += 1
+        
+        if attempted_count > 0:
+            logger.info("Reconciliação: %d tentativas, %d novas conexões", attempted_count, connected_count)
+
+    def get_connection_metrics(self) -> dict:
+        metrics = {
+            "total_connections": len(self.connections),
+            "connections": {},
+            "summary": {
+                "avg_rtt": 0,
+                "healthy_connections": 0
+            }
+        }
+
+        total_rtt = 0
+        count_rtt = 0
+
+        for peer_id, connection in self.connections.items():
+            conn_metrics = connection.get_metrics()
+            metrics["connections"][peer_id] = conn_metrics
+
+            if conn_metrics["avg_rtt"] > 0:
+                total_rtt += conn_metrics["avg_rtt"]
+                count_rtt += 1
+                metrics["summary"]["healthy_connections"] += 1
+            
+        if count_rtt > 0:
+            metrics["summary"]["avg_rtt"] = total_rtt / count_rtt
+        
+        return metrics
