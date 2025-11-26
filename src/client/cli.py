@@ -1,4 +1,4 @@
-"""Command-line interface loop placeholder."""
+"""Command-line interface for the PyP2P client."""
 from __future__ import annotations
 
 import logging
@@ -34,15 +34,7 @@ class CommandLineInterface:
         self._output_callback = callback
 
     def start(self) -> None:
-        """Inicia o loop interativo em uma thread dedicada.
-
-        TODOs principais:
-        - Implementar parser real (provavelmente `cmd.Cmd` ou `prompt_toolkit`).
-        - Garantir que o loop não bloqueie o recebimento de mensagens.
-        - Exibir ajuda contextual (`/help`).
-        - Integrar níveis de log (comando `/log`).
-        """
-
+        """Inicia o loop interativo em uma thread dedicada."""
         if self._thread and self._thread.is_alive():
             return
 

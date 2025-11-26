@@ -25,8 +25,8 @@ class ClientSettings:
     associada ao requisito da especificação.
     """
 
-    name: str = "rafael"  # TODO: permitir definir via CLI (/set name) ou config.
-    namespace: str = "CIC"  # TODO: validar com regex; aceitar `#namespace` no CLI.
+    name: str = "alice"
+    namespace: str = "CIC"
     rendezvous_host: str = "pyp2p.mfcaetano.cc"
     rendezvous_port: int = 8080
     rendezvous_timeout: float = 5.0  # segundos

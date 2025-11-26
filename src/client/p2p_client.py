@@ -9,7 +9,6 @@ from typing import Dict, Optional
 
 from .cli import CommandLineInterface
 from .config import ClientSettings
-from .keep_alive import KeepAliveManager
 from .message_router import MessageRouter
 from .peer_connection import PeerConnection
 from .peer_server import PeerServer
@@ -30,7 +29,6 @@ class P2PClient:
         self.peer_table = PeerTable()
         self.rendezvous = RendezvousClient(self.settings)
         self.router = MessageRouter(self.peer_table, self.state)
-        self.keep_alive = KeepAliveManager(self.settings, self.peer_table)
         self.cli = CommandLineInterface(self.router, self.peer_table, p2p_client=self)
         self.connections: Dict[str, PeerConnection] = {}
         self.peer_server = PeerServer(self.settings, self.peer_table, self._handle_inbound_socket)
@@ -76,7 +74,6 @@ class P2PClient:
             logger.error("Falha ao registrar no rendezvous: %s", exc)
             raise
 
-        self.keep_alive.start()
         self.cli.start()
         self.router.start_ack_checker()
         self.discover_once()
@@ -102,7 +99,6 @@ class P2PClient:
             connection.close()
         self.connections.clear()
         self.peer_server.stop()
-        self.keep_alive.stop()
         self.cli.stop()
         try:
             self.rendezvous.unregister(port=self.settings.listen_port)

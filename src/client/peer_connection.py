@@ -6,7 +6,9 @@ import logging
 import socket
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Callable, Optional
+from uuid import uuid4
 
 from .config import ClientSettings
 from .state import PeerInfo
@@ -40,7 +42,10 @@ class PeerConnection:
 
         self.last_pong_time = None
         self.rtt_samples = []
-        self.ping_interval = 30
+        self.ping_interval = settings.ping_interval
+        
+        # Track pending PINGs by msg_id -> sent_time (float)
+        self._pending_pings: dict[str, float] = {}
 
     @classmethod
     def from_inbound(
@@ -151,55 +156,104 @@ class PeerConnection:
         return False
     
     def _send_ping(self) -> None:
+        """Envia PING com msg_id único e registra tempo de envio."""
+        msg_id = str(uuid4())
+        timestamp = datetime.now(timezone.utc).isoformat()
+        
         ping_msg = {
             "type": "PING",
-            "timestamp": time.time(),
-            "peer_id": self.settings.peer_id
+            "msg_id": msg_id,
+            "timestamp": timestamp,
+            "ttl": 1
         }
+        
+        # Record send time for RTT calculation
+        self._pending_pings[msg_id] = time.time()
+        
+        # Clean up old pending pings (older than 2 minutes)
+        now = time.time()
+        expired = [k for k, v in self._pending_pings.items() if now - v > 120]
+        for k in expired:
+            del self._pending_pings[k]
+        
         try:
             self.send_json(ping_msg)
-            logger.debug("[%s] PING enviado", self.peer.peer_id)
+            logger.debug("[%s] PING enviado (msg_id=%s)", self.peer.peer_id, msg_id[:8])
         except Exception as exc:
+            self._pending_pings.pop(msg_id, None)
             logger.debug("[%s] Falha ao enviar PING: %s", self.peer.peer_id, exc)
     
     def _handle_ping(self, message: dict) -> None:
+        """Responde ao PING com PONG, ecoando msg_id e timestamp."""
+        msg_id = message.get("msg_id", str(uuid4()))
+        timestamp = message.get("timestamp", datetime.now(timezone.utc).isoformat())
+        
         pong_msg = {
             "type": "PONG",
-            "timestamp": message["timestamp"],
-            "peer_id": self.settings.peer_id
+            "msg_id": msg_id,
+            "timestamp": timestamp,
+            "ttl": 1
         }
         try:
             self.send_json(pong_msg)
-            logger.debug("[%s] PONG enviado", self.peer.peer_id)
+            logger.debug("[%s] PONG enviado (msg_id=%s)", self.peer.peer_id, msg_id[:8] if len(msg_id) > 8 else msg_id)
         except Exception as exc:
             logger.debug("[%s] Falha ao enviar PONG: %s", self.peer.peer_id, exc)
     
     def _handle_pong(self, message: dict) -> None:
+        """Processa PONG e calcula RTT baseado no msg_id."""
         try:
-            sent_time = message.get("timestamp")
-            if sent_time is None:
-                logger.warning("[%s] PONG recebido sem timestamp", self.peer.peer_id)
-                return
+            msg_id = message.get("msg_id")
             
-            # Handle timestamp as either float or ISO string
-            if isinstance(sent_time, str):
-                # Try to parse ISO format timestamp
-                try:
-                    from datetime import datetime, timezone
-                    dt = datetime.fromisoformat(sent_time.replace('Z', '+00:00'))
-                    sent_time = dt.timestamp()
-                except (ValueError, AttributeError):
-                    logger.warning("[%s] PONG com timestamp inválido: %s", self.peer.peer_id, sent_time)
+            # Look up when we sent this PING
+            if msg_id and msg_id in self._pending_pings:
+                sent_time = self._pending_pings.pop(msg_id)
+                rtt = time.time() - sent_time
+            else:
+                # Fallback: try to use timestamp from message (for compatibility)
+                timestamp = message.get("timestamp")
+                if timestamp is None:
+                    logger.debug("[%s] PONG recebido sem msg_id conhecido", self.peer.peer_id)
                     return
+                
+                # Handle timestamp as either float or ISO string
+                if isinstance(timestamp, str):
+                    try:
+                        dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                        sent_time = dt.timestamp()
+                    except (ValueError, AttributeError):
+                        logger.warning("[%s] PONG com timestamp inválido: %s", self.peer.peer_id, timestamp)
+                        return
+                else:
+                    sent_time = timestamp
+                
+                rtt = time.time() - sent_time
             
-            rtt = time.time() - sent_time
+            rtt_ms = rtt * 1000  # Convert to milliseconds
+            
+            # Sanity check: RTT should be positive and reasonable (< 60 seconds)
+            if rtt < 0 or rtt > 60:
+                logger.warning("[%s] RTT inválido ignorado: %.3fs", self.peer.peer_id, rtt)
+                return
 
             self.rtt_samples.append(rtt)
             if len(self.rtt_samples) > 10:
                 self.rtt_samples.pop(0)
             
             self.last_pong_time = time.time()
-            logger.debug("[%s] PONG recebido - RTT: %.3fs", self.peer.peer_id, rtt)
+            
+            # Update PeerInfo average_rtt_ms using EMA (alpha=0.3)
+            alpha = 0.3
+            if self.peer.average_rtt_ms is None:
+                self.peer.average_rtt_ms = rtt_ms
+            else:
+                self.peer.average_rtt_ms = alpha * rtt_ms + (1 - alpha) * self.peer.average_rtt_ms
+            
+            # Update last_seen_at
+            self.peer.last_seen_at = datetime.now()
+            
+            logger.debug("[%s] PONG recebido - RTT: %.1fms (avg: %.1fms)", 
+                        self.peer.peer_id, rtt_ms, self.peer.average_rtt_ms)
 
         except Exception as exc:
             logger.warning("[%s] Erro ao processar PONG: %s", self.peer.peer_id, exc)

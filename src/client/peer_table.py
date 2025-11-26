@@ -25,11 +25,7 @@ class PeerTable:
         self.max_inbound = max_inbound
 
     def upsert_peer(self, peer: PeerInfo) -> None:
-        """Adiciona ou atualiza um peer.
-
-        TODO: aplicar políticas de expulsão quando o limite for atingido.
-        """
-
+        """Adiciona ou atualiza um peer."""
         with self._lock:
             self._peers[peer.peer_id] = peer
 

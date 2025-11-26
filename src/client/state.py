@@ -27,10 +27,7 @@ class PeerInfo:
 class MessageRecord:
     """Metadados de uma mensagem enviada/recebida.
 
-    TODOs relacionados:
-    - Persistir as últimas N mensagens para `/conn` e `/rtt`.
-    - Conferir tamanho e TTL antes de efetuar o envio.
-    - Usar este registro para correlacionar ACKs e calcular latência.
+    Usado para histórico em `/conn` e correlação de ACKs.
     """
 
     msg_id: str
@@ -52,5 +49,3 @@ class ClientRuntimeState:
     inbound_history: List[MessageRecord] = field(default_factory=list)
     connected_since: Optional[datetime] = None
     shutting_down: bool = False
-
-    # TODO: considerar uso de ``asyncio.Lock``/``RLock`` conforme arquitetura final.
