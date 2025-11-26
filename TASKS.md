@@ -134,9 +134,7 @@ Este documento organiza as tarefas necessárias para implementar o cliente de ch
 4. Cobrir com testes (unitários + scripts em `tools/`), atualizar README/guia de operação e preparar checklists finais da RC202502.
 
 ### Funcionalidades Ainda Não Implementadas
-- PING/PONG periódico com cálculo de RTT e marcação automática de peers `STALE`.
 - Fluxo completo de envio/roteamento de SEND/ACK e PUB (incluindo geração de `msg_id`, filas de saída e tratamento de timeouts).
-- CLI interativa com todos os comandos descritos na especificação (`/msg`, `/pub`, `/conn`, `/rtt`, `/reconnect`, `/log`, `/quit`).
 - BYE/BYE_OK e encerramento gracioso por peer, com limpeza coordenada das conexões.
 - Reconexão automática com política de backoff e limites configuráveis.
 - Observabilidade expandida: logs estruturados, métricas em tempo real e histórico de mensagens para depuração.
@@ -144,9 +142,55 @@ Este documento organiza as tarefas necessárias para implementar o cliente de ch
 ### Notas rápidas
 - O servidor Rendezvous é fornecido pronto pelo professor; manter foco apenas no cliente (registro, discovery e conexões diretas).
 
+---
+
+## Status das Branches (Atualizado em 2025-11-26)
+
+### Branch `main`
+**Status: Base funcional, CLI e PING/PONG ausentes**
+
+| Componente | Status | Descrição |
+|------------|--------|-----------|
+| `ClientSettings` | ✅ Completo | Carregamento de configuração via JSON |
+| `RendezvousClient` | ✅ Completo | REGISTER/DISCOVER/UNREGISTER funcionais |
+| `PeerTable` | ✅ Completo | Registro thread-safe de peers com status |
+| `PeerServer` | ✅ Completo | Listener TCP com handshake HELLO/HELLO_OK |
+| `PeerConnection` | ✅ Completo | Conexões inbound/outbound com leitura contínua |
+| `P2PClient` | ✅ Completo | Orquestrador com registro, discovery worker, shutdown |
+| `CommandLineInterface` | ⚠️ Stub | Loop existe mas apenas ecoa comandos |
+| `MessageRouter` | ⚠️ Stub | Estrutura existe mas sem lógica de envio |
+| `KeepAliveManager` | ⚠️ Stub | Thread roda mas não envia PINGs |
+| PING/PONG + RTT | ❌ Ausente | Não implementado |
+| SEND/ACK | ❌ Ausente | Não implementado |
+| BYE/BYE_OK | ❌ Ausente | Não implementado |
+
+### Branch `pingpong`
+**Status: Adiciona PING/PONG e CLI completa — PRONTO PARA MERGE**
+
+| Componente | Status | Descrição |
+|------------|--------|-----------|
+| PING/PONG + RTT | ✅ Implementado | PINGs a cada 30s, cálculo de RTT, métricas |
+| CLI Completa | ✅ Implementado | Todos os comandos: `/peers`, `/msg`, `/pub`, `/conn`, `/rtt`, `/reconnect`, `/log`, `/quit`, `/help` |
+| `P2PClient` melhorias | ✅ Implementado | `connect_to_peer()`, `reconcile_peer_connections()`, `get_connection_metrics()` |
+| CLI Tester | ✅ Novo | Ferramenta `src/tools/cli_tester.py` para testes manuais |
+| SEND/ACK real | ⚠️ Parcial | CLI prepara mensagens mas `MessageRouter` não está conectado |
+| PUB broadcast | ⚠️ Parcial | CLI prepara mas não envia realmente |
+| Reconexão automática | ⚠️ Stub | Método existe mas não implementado |
+
+**Arquivos modificados em `pingpong`:**
+- `src/client/cli.py` (+280 linhas) — CLI completa
+- `src/client/p2p_client.py` (+74 linhas) — Métodos de conexão e métricas
+- `src/client/peer_connection.py` (+87 linhas) — PING/PONG e RTT
+- `src/tools/cli_tester.py` (novo) — Ferramenta de teste
+
+**Recomendação:** Fazer merge de `pingpong` → `main` para incorporar PING/PONG e CLI.
+
+---
+
 ### Diário de Implementação
 - **2025-11-17 (Iteração 1)**: Plano em `TASKS.md` revisado com orientações extras de segurança, testes e documentação. Criado esqueleto do pacote `src/client/` (config, state, peer table, rendezvous client, conexões, roteador, keep-alive, CLI, orquestrador e entry-point) contendo comentários sobre funcionalidades pendentes.
 - **2025-11-17 (Iteração 2)**: Implementados carregamento de configuração via JSON (`ClientSettings`), cliente de rendezvous com REGISTER/DISCOVER/UNREGISTER reais e integração no `P2PClient` (registro, descoberta inicial e shutdown limpo com tratamento de erros).
 - **2025-11-17 (Iteração 3)**: Adicionados worker de descoberta periódica (thread dedicada) e saneamento da `PeerTable` (`mark_missing_as_stale`). `P2PClient` agora mantém sincronização contínua com o rendezvous e protege contra peers obsoletos.
 - **2025-11-17 (Iteração 4)**: Criado `PeerServer` (listener TCP) com handshake HELLO/HELLO_OK básico e integração ao `P2PClient`. Servidor abre na porta configurada antes do REGISTER e encerra no shutdown. As conexões ainda são encerradas após o handshake; próxima etapa manterá os sockets para troca de mensagens.
 - **2025-11-17 (Iteração 5)**: Implementado `PeerConnection` com handshake HELLO/HELLO_OK persistente, leitura contínua e envio JSON. `PeerServer` agora transfere o socket aceito para o `P2PClient`, que cria/gerencia instâncias de `PeerConnection`, registra callbacks de mensagem/fechamento e encerra todas as conexões durante o shutdown.
+- **2025-11-26 (Análise de Branches)**: Relatório completo das branches `main` e `pingpong`. Branch `pingpong` contém PING/PONG com RTT e CLI completa — recomendado merge para `main`.
