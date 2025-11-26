@@ -5,6 +5,7 @@ import json
 import logging
 import socket
 import threading
+import time
 from typing import Callable, Optional
 
 from .config import ClientSettings
@@ -34,7 +35,12 @@ class PeerConnection:
         self._on_message = on_message
         self._on_closed = on_closed
         self._reader_thread: Optional[threading.Thread] = None
+        self._ping_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+
+        self.last_pong_time = None
+        self.rtt_samples = []
+        self.ping_interval = 30
 
     @classmethod
     def from_inbound(
@@ -92,14 +98,91 @@ class PeerConnection:
                     except json.JSONDecodeError:
                         logger.warning("[%s] mensagem inválida recebida: %s", self.peer.peer_id, line)
                         continue
+                    if self._handle_control_message(message):
+                        continue
                     if self._on_message:
                         self._on_message(self, message)
             finally:
                 self.close()
 
+        def _ping_loop() -> None:
+            while not self._stop_event.is_set():
+                self._stop_event.wait(self.ping_interval)
+
+                if not self._stop_event.is_set() and self.is_outbound:
+                    self._send_ping()
+
         self._stop_event.clear()
         self._reader_thread = threading.Thread(target=_loop, name=f"peer-reader-{self.peer.peer_id}", daemon=True)
         self._reader_thread.start()
+
+        if self.is_outbound:
+            self._ping_thread = threading.Thread(target=_ping_loop, name=f"peer-ping-{self.peer.peer_id}", daemon=True)
+            self._ping_thread.start()
+
+    def _handle_control_message(self, message: dict) -> bool:
+        msg_type = message.get("type")
+
+        if msg_type == "PING":
+            self._handle_ping(message)
+            return True
+        elif msg_type == "PONG":
+            self._handle_pong(message)
+            return True
+        
+        return False
+    
+    def _send_ping(self) -> None:
+        ping_msg = {
+            "type": "PING",
+            "timestamp": time.time(),
+            "peer_id": self.settings.peer_id
+        }
+        try:
+            self.send_json(ping_msg)
+            logger.debug("[%s] PING enviado", self.peer.peer_id)
+        except Exception as exc:
+            logger.debug("[%s] Falha ao enviar PING: %s", self.peer.peer_id, exc)
+    
+    def _handle_ping(self, message: dict) -> None:
+        pong_msg = {
+            "type": "PONG",
+            "timestamp": message["timestamp"],
+            "peer_id": self.settings.peer_id
+        }
+        try:
+            self.send_json(pong_msg)
+            logger.debug("[%s] PONG enviado", self.peer.peer_id)
+        except Exception as exc:
+            logger.debug("[%s] Falha ao enviar PONG: %s", self.peer.peer_id, exc)
+    
+    def _handle_pong(self, message: dict) -> None:
+        try:
+            sent_time = message["timestamp"]
+            rtt = time.time() - sent_time
+
+            self.rtt_samples.append(rtt)
+            if len(self.rtt_samples) > 10:
+                self.rtt_samples.pop(0)
+            
+            self.last_pong_time = time.time()
+            logger.debug("[%s] PONG recebido - RTT: %.3fs", self.peer.peer_id, rtt)
+
+        except KeyError:
+            logger.warning("[%s] PONG recebido sem timestamp válido", self.peer.peer_id)
+
+    def get_metrics(self) -> dict:
+        """Retorna métricas da conexão"""
+        avg_rtt = sum(self.rtt_samples) / len(self.rtt_samples) if self.rtt_samples else 0
+
+        return {
+            "peer_id": self.peer.peer_id,
+            "is_outbound": self.is_outbound,
+            "avg_rtt": avg_rtt,
+            "rtt_samples": len(self.rtt_samples),
+            "last_pong": self.last_pong_time,
+            "active": not self._stop_event.is_set()
+        }
 
     def send_json(self, message: dict) -> None:
         encoded = json.dumps(message, separators=(",", ":")).encode("utf-8") + b"\n"
@@ -133,6 +216,10 @@ class PeerConnection:
         if self._stop_event.is_set():
             return
         self._stop_event.set()
+
+        if self._ping_thread and self._ping_thread.is_alive():
+            self._ping_thread.join(timeout=1)
+
         try:
             self.socket.shutdown(socket.SHUT_RDWR)
         except OSError:
