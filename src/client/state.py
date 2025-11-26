@@ -14,12 +14,13 @@ class PeerInfo:
     address: str
     port: int
     namespace: str
-    status: str = "UNKNOWN"  # TODO: usar Enum com CONNECTED/STALE/FAILED.
+    status: str = "UNKNOWN"  # CONNECTED/STALE/FAILED/DISCOVERED
     last_seen_at: Optional[datetime] = None
     average_rtt_ms: Optional[float] = None
     reconnect_attempts: int = 0
     supports_ack: bool = True
     features: List[str] = field(default_factory=list)
+    last_connection_attempt: Optional[float] = None  # timestamp of last connection attempt
 
 
 @dataclass(slots=True)

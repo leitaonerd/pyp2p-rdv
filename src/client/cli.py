@@ -96,26 +96,23 @@ class CommandLineInterface:
         except Exception as exc:
             self._emit(f"Erro executando {command}: {exc}")
 
-
-        self._emit(f"[CLI] Comando recebido (stub): {raw_command}")
-
     def _cmd_peers(self, args: list) -> None:
         filter_arg = args[0] if args else None
 
-        peers = self.peer_table.all()
-        if not peers:
+        all_peers = list(self.peer_table.all())
+        if not all_peers:
             self._emit("Nenhum peer conhecido")
             return
         
         if filter_arg == "*":
-            filtered_peers = peers
+            filtered_peers = all_peers
             title = "TODOS OS PEERS"
         elif filter_arg and filter_arg.startswith("#"):
             namespace = filter_arg[1:]
-            filtered_peers = [p for p in peers if hasattr(p, "namespace") and p.namespace == namespace]
+            filtered_peers = [p for p in all_peers if hasattr(p, "namespace") and p.namespace == namespace]
             title = f"PEERS DO NAMESPACE #{namespace}"
         else:
-            filtered_peers = peers
+            filtered_peers = all_peers
             title = "PEERS CONHECIDOS"
         
         if not filtered_peers:
@@ -124,11 +121,13 @@ class CommandLineInterface:
         
         connected_count = 0
         for peer in filtered_peers:
-            status_icon =  "Connected" if getattr(peer, "status", "") == "CONNECTED" else "Not connected"
-            peer_line = f"  {peer.peer_id} {status_icon}"
+            # Check if actually connected
+            is_connected = self.p2p_client and peer.peer_id in self.p2p_client.connections
+            status_icon = "✓" if is_connected else "✗"
+            peer_line = f"  {status_icon} {peer.peer_id}"
 
             if hasattr(peer, "address") and peer.address:
-                peer_line += f" | {peer.address}:{getattr(peer, "port", "?")}"
+                peer_line += f" | {peer.address}:{getattr(peer, 'port', '?')}"
             if hasattr(peer, "namespace") and peer.namespace:
                 peer_line += f" | #{peer.namespace}"
             if hasattr(peer, "status"):
@@ -136,7 +135,7 @@ class CommandLineInterface:
                 
             self._emit(peer_line)
             
-            if getattr(peer, "status", "") == "CONNECTED":
+            if is_connected:
                 connected_count += 1
             
         self._emit(f"\nTotal: {len(filtered_peers)} peers, {connected_count} conectados")
@@ -150,18 +149,21 @@ class CommandLineInterface:
         peer_id = args[0]
         message_text = " ".join(args[1:])
 
-        peers = self.peer_table.all()
-        target_peer = next((p for p in peers if p.peer_id == peer_id), None)
-        
-        if not target_peer:
-            self._emit(f"Erro: Peer '{peer_id}' não encontrado")
-            self._emit("Use /peers para ver peers disponíveis")
+        # Check if peer is connected
+        if self.p2p_client and peer_id not in self.p2p_client.connections:
+            self._emit(f"Erro: Peer '{peer_id}' não está conectado")
+            self._emit("Use /peers para ver peers disponíveis e /reconnect para tentar conectar")
             return
 
-        self._emit(f"[{peer_id}] {message_text}")
-        self._emit("Mensagem enfileirada")
-
-        # TODO: Implementar com self.router.send_direct_message(peer_id, message_text)
+        # Send through router
+        if self.p2p_client:
+            record = self.p2p_client.router.send(peer_id, message_text, require_ack=True)
+            if record:
+                self._emit(f"-> [{peer_id}] {message_text}")
+            else:
+                self._emit(f"Erro: Falha ao enviar mensagem para {peer_id}")
+        else:
+            self._emit("Erro: Cliente P2P não disponível")
 
     def _cmd_pub(self, args: list) -> None:
         if len(args) < 2:
@@ -174,26 +176,22 @@ class CommandLineInterface:
         destination = args[0]
         message_text = " ".join(args[1:])
 
-        if destination == "*":
-            peers = self.peer_table.all()
-            target_count = len([p for p in peers if p.peer_id != getattr(self, "local_peer_id", "")])
-            self._emit(f"[BROADCAST] {message_text}")
-            self._emit(f"Enviando para {target_count} peers")
-            
-        elif destination.startswith("#"):
-            namespace = destination[1:]
-            peers = self.peer_table.all()
-            namespace_peers = [p for p in peers if hasattr(p, "namespace") and p.namespace == namespace]
-            target_count = len(namespace_peers)
-            
-            self._emit(f"[#{namespace}] {message_text}")
-            self._emit(f"Enviando para {target_count} peers no namespace #{namespace}")
-            
-        else:
+        if destination != "*" and not destination.startswith("#"):
             self._emit("Erro: Destino deve ser '*' ou '#<namespace>'")
             return
 
-        # TODO: Implementar com self.router.send_public_message(destination, message_text)
+        if not self.p2p_client:
+            self._emit("Erro: Cliente P2P não disponível")
+            return
+
+        # Send through router
+        results = self.p2p_client.router.publish(destination, message_text)
+        
+        if results:
+            self._emit(f"-> [{destination}] {message_text}")
+            self._emit(f"Enviado para {len(results)} peers")
+        else:
+            self._emit(f"Nenhum peer conectado para {destination}")
 
     def _cmd_conn(self) -> None:
         if not self.p2p_client:
@@ -289,9 +287,14 @@ class CommandLineInterface:
 
         self._emit("Forçando reconciliação de conexões...")
         
-        # TODO: Implementar self.p2p_client.force_reconciliation()
-        self._emit("Reconciliação solicitada")
-        self._emit("Funcionalidade em desenvolvimento")
+        # Force discovery first
+        self.p2p_client.discover_once()
+        
+        # Then reconcile connections
+        self.p2p_client.reconcile_peer_connections()
+        
+        connected = len(self.p2p_client.connections)
+        self._emit(f"Reconciliação concluída. {connected} conexões ativas.")
 
     def _cmd_log(self, args: list) -> None:
         if not args:

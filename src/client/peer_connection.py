@@ -129,6 +129,12 @@ class PeerConnection:
         elif msg_type == "PONG":
             self._handle_pong(message)
             return True
+        elif msg_type == "HELLO":
+            # HELLO should only be handled during handshake
+            return True
+        elif msg_type == "HELLO_OK":
+            # HELLO_OK should only be handled during handshake
+            return True
         
         return False
     
