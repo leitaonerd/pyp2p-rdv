@@ -12,6 +12,22 @@ from .config import ClientSettings
 from .p2p_client import P2PClient
 
 
+def find_default_config() -> Path | None:
+    """Procura config.json no diretório do módulo ou diretório atual."""
+    # Primeiro, tenta no diretório do módulo
+    module_dir = Path(__file__).parent
+    config_in_module = module_dir / "config.json"
+    if config_in_module.exists():
+        return config_in_module
+    
+    # Depois, tenta no diretório atual
+    config_in_cwd = Path.cwd() / "config.json"
+    if config_in_cwd.exists():
+        return config_in_cwd
+    
+    return None
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="PyP2P client")
     parser.add_argument("--config", type=Path, help="Caminho para arquivo de configuração", default=None)
@@ -30,7 +46,15 @@ def main() -> None:
     parser = build_arg_parser()
     args = parser.parse_args()
 
-    settings = ClientSettings.from_file(args.config)
+    # Auto-detect config file if not specified
+    config_path = args.config if args.config else find_default_config()
+    settings = ClientSettings.from_file(config_path)
+    
+    if config_path:
+        print(f"Configuração carregada de: {config_path}")
+    else:
+        print("Usando configurações padrão (config.json não encontrado)")
+    
     if args.log_level:
         settings.log_level = args.log_level.upper()
 

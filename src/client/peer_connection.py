@@ -176,7 +176,22 @@ class PeerConnection:
     
     def _handle_pong(self, message: dict) -> None:
         try:
-            sent_time = message["timestamp"]
+            sent_time = message.get("timestamp")
+            if sent_time is None:
+                logger.warning("[%s] PONG recebido sem timestamp", self.peer.peer_id)
+                return
+            
+            # Handle timestamp as either float or ISO string
+            if isinstance(sent_time, str):
+                # Try to parse ISO format timestamp
+                try:
+                    from datetime import datetime, timezone
+                    dt = datetime.fromisoformat(sent_time.replace('Z', '+00:00'))
+                    sent_time = dt.timestamp()
+                except (ValueError, AttributeError):
+                    logger.warning("[%s] PONG com timestamp inválido: %s", self.peer.peer_id, sent_time)
+                    return
+            
             rtt = time.time() - sent_time
 
             self.rtt_samples.append(rtt)
@@ -186,8 +201,8 @@ class PeerConnection:
             self.last_pong_time = time.time()
             logger.debug("[%s] PONG recebido - RTT: %.3fs", self.peer.peer_id, rtt)
 
-        except KeyError:
-            logger.warning("[%s] PONG recebido sem timestamp válido", self.peer.peer_id)
+        except Exception as exc:
+            logger.warning("[%s] Erro ao processar PONG: %s", self.peer.peer_id, exc)
 
     def get_metrics(self) -> dict:
         """Retorna métricas da conexão"""
@@ -217,8 +232,8 @@ class PeerConnection:
 
     def _recv_line(self) -> str:
         buf = b""
-        # Timeout should be longer than ping interval (30s) to avoid false timeouts
-        self.socket.settimeout(self.settings.extra.get("peer_read_timeout", 60.0))
+        # Timeout of 1 hour - connections should stay alive for long periods
+        self.socket.settimeout(self.settings.extra.get("peer_read_timeout", 3600.0))
         while True:
             chunk = self.socket.recv(4096)
             if not chunk:

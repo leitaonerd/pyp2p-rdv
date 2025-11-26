@@ -84,6 +84,8 @@ class CommandLineInterface:
                 self._cmd_rtt()
             elif command == "/reconnect":
                 self._cmd_reconnect()
+            elif command == "/status":
+                self._cmd_status()
             elif command == "/log":
                 self._cmd_log(parts[1:])
             elif command == "/quit":
@@ -326,6 +328,41 @@ class CommandLineInterface:
         if self.p2p_client:
             self.p2p_client.shutdown()
 
+    def _cmd_status(self) -> None:
+        """Exibe as configurações atuais do cliente."""
+        if not self.p2p_client:
+            self._emit("Cliente não disponível")
+            return
+        
+        settings = self.p2p_client.settings
+        config_file = settings.config_file if settings.config_file else "(padrão)"
+        
+        status_text = f"""
+╔══════════════════════════════════════════════════════════════╗
+║                    CONFIGURAÇÕES ATUAIS                       ║
+╠══════════════════════════════════════════════════════════════╣
+║  Arquivo de config: {str(config_file):<40} ║
+║  Peer ID:           {settings.peer_id:<40} ║
+║  Nome:              {settings.name:<40} ║
+║  Namespace:         {settings.namespace:<40} ║
+╠══════════════════════════════════════════════════════════════╣
+║  RENDEZVOUS SERVER                                            ║
+║  Host:              {settings.rendezvous_host:<40} ║
+║  Porta:             {str(settings.rendezvous_port):<40} ║
+║  Timeout:           {str(settings.rendezvous_timeout) + 's':<40} ║
+╠══════════════════════════════════════════════════════════════╣
+║  SERVIDOR P2P LOCAL                                           ║
+║  Listen Host:       {settings.listen_host:<40} ║
+║  Listen Port:       {str(settings.listen_port):<40} ║
+╠══════════════════════════════════════════════════════════════╣
+║  INTERVALOS                                                   ║
+║  Discovery:         {str(settings.discovery_interval) + 's':<40} ║
+║  Ping:              {str(settings.ping_interval) + 's':<40} ║
+║  TTL:               {str(settings.ttl_seconds) + 's':<40} ║
+╚══════════════════════════════════════════════════════════════╝
+"""
+        self._emit(status_text)
+
     def _cmd_help(self) -> None:
         help_text = """
 
@@ -341,6 +378,7 @@ MENSAGENS:
   /pub #<ns> <msg>  - Mensagem para namespace
 
 SISTEMA:
+  /status           - Mostrar configurações atuais
   /log <nível>      - Ajustar nível de log
   /help             - Mostrar esta ajuda
   /quit             - Encerrar aplicação
