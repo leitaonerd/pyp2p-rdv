@@ -38,14 +38,13 @@ class P2PClient:
         self._reconnect_thread: Optional[threading.Thread] = None
         self._reconnect_stop = threading.Event()
 
-        # Wire up the router with connections and settings
+        # Setar o roteador com as conexões e configs
         self.router.set_local_peer_id(self.settings.peer_id)
         self.router.set_connections(self.connections)
         self.router.set_message_callback(self._on_message_received)
 
     def start(self) -> None:
-        """Fluxo inicial descrito na Seção "Próximos Passos Recomendados".
-
+        """
         Passos planejados:
         1. Carregar/validar configuração.
         2. Registrar no rendezvous e iniciar ciclo de descoberta.
@@ -88,11 +87,11 @@ class P2PClient:
         self._stop_reconnect_worker()
         self.router.stop_ack_checker()
         
-        # Send BYE to all connected peers
+        # Manda BYE pra todos os peers
         for peer_id in list(self.connections.keys()):
             self.router.send_bye(peer_id, "Encerrando cliente")
         
-        # Wait a bit for BYE_OK responses
+        # Espera respostas do BYE
         time.sleep(0.5)
         
         for connection in list(self.connections.values()):
@@ -232,13 +231,13 @@ class P2PClient:
             if not peer.address or not peer.port:
                 continue
             
-            # Check max reconnect attempts
+            # Verifica o max de tentativas de reconexao
             if peer.reconnect_attempts >= self.settings.max_reconnect_attempts:
                 logger.debug("Peer %s atingiu máximo de tentativas (%d)", 
                            peer.peer_id, self.settings.max_reconnect_attempts)
                 continue
                 
-            # Calculate backoff delay
+            # Calcula o delay de backoff
             backoff_delay = self.settings.reconnect_backoff_base ** peer.reconnect_attempts
             last_attempt = peer.last_connection_attempt or 0
             
@@ -249,13 +248,13 @@ class P2PClient:
                         peer.peer_id, peer.address, peer.port, peer.reconnect_attempts + 1)
             attempted_count += 1
 
-            # Update attempt tracking
+            # Atualiza o tracking de tentativas
             peer.last_connection_attempt = time.time()
             peer.reconnect_attempts += 1
             self.peer_table.upsert_peer(peer)
 
             if self.connect_to_peer(peer):
-                # Reset attempts on successful connection
+                # Reseta tentativas quando funciona
                 peer.reconnect_attempts = 0
                 peer.status = "CONNECTED"
                 self.peer_table.upsert_peer(peer)

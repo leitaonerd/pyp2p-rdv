@@ -14,13 +14,13 @@ from .p2p_client import P2PClient
 
 def find_default_config() -> Path | None:
     """Procura config.json no diretório do módulo ou diretório atual."""
-    # Primeiro, tenta no diretório do módulo
+    # Primeiro tenta no diretório do módulo
     module_dir = Path(__file__).parent
     config_in_module = module_dir / "config.json"
     if config_in_module.exists():
         return config_in_module
     
-    # Depois, tenta no diretório atual
+    # Depois tenta no diretório atual
     config_in_cwd = Path.cwd() / "config.json"
     if config_in_cwd.exists():
         return config_in_cwd
@@ -46,7 +46,7 @@ def main() -> None:
     parser = build_arg_parser()
     args = parser.parse_args()
 
-    # Auto-detect config file if not specified
+    # Auto-detect pro config file se n especificar
     config_path = args.config if args.config else find_default_config()
     settings = ClientSettings.from_file(config_path)
     
@@ -61,14 +61,14 @@ def main() -> None:
     configure_logging(settings.log_level)
     client = P2PClient(settings)
 
-    # Event to signal shutdown
+    # Evento pra sinalizar shutdown
     shutdown_event = threading.Event()
 
     def signal_handler(sig, frame):
         print("\nRecebido sinal de interrupção. Encerrando...")
         shutdown_event.set()
 
-    # Register signal handlers
+    # Registra os signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
@@ -77,9 +77,9 @@ def main() -> None:
         print(f"\nCliente P2P iniciado como {settings.peer_id}")
         print("Digite /help para ver os comandos disponíveis.\n")
         
-        # Wait until shutdown is signaled or CLI thread ends
+        # Espera ate sinalizar shutdown ou fim da thread da CLI
         while not shutdown_event.is_set() and client._running:
-            # Check if CLI thread is still alive
+            # Verifica se a CLI ainda ta rodando
             if client.cli._thread and not client.cli._thread.is_alive():
                 break
             shutdown_event.wait(timeout=0.5)

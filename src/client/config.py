@@ -5,7 +5,6 @@ Responsabilidades planejadas:
 - Permitir overrides por variáveis de ambiente/CLI (ex.: host, namespace).
 - Validar limites (payload, intervalo de discovery, tentativas de reconexão).
 - Expor método ``peer_id`` com o formato ``name@namespace``.
-- No futuro, suportar múltiplos perfis (prod, staging, mock rendezvous).
 """
 from __future__ import annotations
 

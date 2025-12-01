@@ -98,7 +98,7 @@ class PeerConnection:
                     try:
                         line = self._recv_line()
                         if not line:
-                            # Empty line or connection closed
+                            # linha vazia ou fechou conexao
                             if self._stop_event.is_set():
                                 break
                             continue
@@ -167,10 +167,10 @@ class PeerConnection:
             "ttl": 1
         }
         
-        # Record send time for RTT calculation
+        # Guarda o momento de envio pra calcular o RTT
         self._pending_pings[msg_id] = time.time()
         
-        # Clean up old pending pings (older than 2 minutes)
+        # Limpar pings antigos (2 min)
         now = time.time()
         expired = [k for k, v in self._pending_pings.items() if now - v > 120]
         for k in expired:
@@ -205,18 +205,18 @@ class PeerConnection:
         try:
             msg_id = message.get("msg_id")
             
-            # Look up when we sent this PING
+            # Olhar quando o PING foi enviado
             if msg_id and msg_id in self._pending_pings:
                 sent_time = self._pending_pings.pop(msg_id)
                 rtt = time.time() - sent_time
             else:
-                # Fallback: try to use timestamp from message (for compatibility)
+                # Fallback: tentar usar o timestamp da mensagem
                 timestamp = message.get("timestamp")
                 if timestamp is None:
                     logger.debug("[%s] PONG recebido sem msg_id conhecido", self.peer.peer_id)
                     return
                 
-                # Handle timestamp as either float or ISO string
+                # Usar o timestamp como float ou ISO string
                 if isinstance(timestamp, str):
                     try:
                         dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
@@ -229,7 +229,7 @@ class PeerConnection:
                 
                 rtt = time.time() - sent_time
             
-            rtt_ms = rtt * 1000  # Convert to milliseconds
+            rtt_ms = rtt * 1000  # converter pra milisegungos
             
             # Sanity check: RTT should be positive and reasonable (< 60 seconds)
             if rtt < 0 or rtt > 60:
@@ -242,14 +242,14 @@ class PeerConnection:
             
             self.last_pong_time = time.time()
             
-            # Update PeerInfo average_rtt_ms using EMA (alpha=0.3)
+            # Utualizar PeerInfo average_rtt_ms com EMA (alpha=0.3)
             alpha = 0.3
             if self.peer.average_rtt_ms is None:
                 self.peer.average_rtt_ms = rtt_ms
             else:
                 self.peer.average_rtt_ms = alpha * rtt_ms + (1 - alpha) * self.peer.average_rtt_ms
             
-            # Update last_seen_at
+            # Utualizar o last_seen_at
             self.peer.last_seen_at = datetime.now()
             
             logger.debug("[%s] PONG recebido - RTT: %.1fms (avg: %.1fms)", 
