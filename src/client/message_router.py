@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 from uuid import uuid4
 
+from .config import MAX_PAYLOAD_BYTES
 from .peer_table import PeerTable
 from .state import ClientRuntimeState, MessageRecord
 
@@ -18,6 +19,21 @@ logger = logging.getLogger(__name__)
 
 # Timeout for ACK in seconds
 ACK_TIMEOUT_SECONDS = 5.0
+
+
+class PayloadTooLargeError(ValueError):
+    """Erro quando payload excede o limite de 32KB."""
+    pass
+
+
+def validate_payload(payload: str) -> str:
+    """Valida que o payload não excede 32KB."""
+    payload_bytes = payload.encode("utf-8")
+    if len(payload_bytes) > MAX_PAYLOAD_BYTES:
+        raise PayloadTooLargeError(
+            f"Payload excede limite de {MAX_PAYLOAD_BYTES} bytes: {len(payload_bytes)} bytes"
+        )
+    return payload
 
 
 class MessageRouter:
@@ -91,6 +107,13 @@ class MessageRouter:
 
     def send(self, dst_peer_id: str, payload: str, require_ack: bool = True) -> Optional[MessageRecord]:
         """Envia mensagem SEND para um peer específico."""
+        # Valida tamanho do payload
+        try:
+            validate_payload(payload)
+        except PayloadTooLargeError as exc:
+            logger.error("[Router] %s", exc)
+            return None
+        
         connection = self._connections.get(dst_peer_id)
         if not connection:
             logger.warning("[Router] Peer %s não conectado, não é possível enviar", dst_peer_id)
@@ -134,6 +157,13 @@ class MessageRouter:
 
     def publish(self, destination: str, payload: str) -> Dict[str, Optional[MessageRecord]]:
         """Envia PUB para um namespace (#ns) ou broadcast global (*)."""
+        # Valida tamanho do payload
+        try:
+            validate_payload(payload)
+        except PayloadTooLargeError as exc:
+            logger.error("[Router] %s", exc)
+            return {}
+        
         results: Dict[str, Optional[MessageRecord]] = {}
         msg_id = str(uuid4())
         now = datetime.now(timezone.utc)

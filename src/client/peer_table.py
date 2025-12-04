@@ -24,10 +24,27 @@ class PeerTable:
         self.max_outbound = max_outbound
         self.max_inbound = max_inbound
 
-    def upsert_peer(self, peer: PeerInfo) -> None:
-        """Adiciona ou atualiza um peer."""
+    def upsert_peer(self, peer: PeerInfo) -> bool:
+        """Adiciona ou atualiza um peer.
+        
+        Returns:
+            True se é um peer novo, False se já existia.
+        """
         with self._lock:
-            self._peers[peer.peer_id] = peer
+            is_new = peer.peer_id not in self._peers
+            if is_new:
+                self._peers[peer.peer_id] = peer
+            else:
+                # Atualiza campos do peer existente, preservando alguns estados
+                existing = self._peers[peer.peer_id]
+                existing.address = peer.address
+                existing.port = peer.port
+                existing.namespace = peer.namespace
+                existing.last_seen_at = peer.last_seen_at
+                # Preserva status se já estava CONNECTED
+                if existing.status != "CONNECTED":
+                    existing.status = peer.status
+            return is_new
 
     def get(self, peer_id: str) -> Optional[PeerInfo]:
         with self._lock:
@@ -54,7 +71,13 @@ class PeerTable:
             total = len(self._peers)
             connected = sum(1 for peer in self._peers.values() if peer.status == "CONNECTED")
             stale = sum(1 for peer in self._peers.values() if peer.status == "STALE")
-        return {"total": total, "connected": connected, "stale": stale}
+            discovered = sum(1 for peer in self._peers.values() if peer.status == "DISCOVERED")
+        return {"total": total, "connected": connected, "stale": stale, "discovered": discovered}
+
+    def exists(self, peer_id: str) -> bool:
+        """Verifica se um peer já existe na tabela."""
+        with self._lock:
+            return peer_id in self._peers
 
     def mark_missing_as_stale(self, seen_peer_ids: Set[str], stale_after: float) -> None:
         """Marca peers não vistos recentemente como STALE."""

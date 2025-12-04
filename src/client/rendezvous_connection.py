@@ -8,7 +8,14 @@ from contextlib import closing
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from .config import ClientSettings
+from .config import (
+    ClientSettings,
+    ConfigValidationError,
+    validate_name,
+    validate_namespace,
+    validate_port,
+    validate_ttl,
+)
 from .state import PeerInfo
 
 
@@ -63,12 +70,24 @@ class RendezvousClient:
         return data.decode("utf-8", errors="replace")
 
     def register(self, port: Optional[int] = None, ttl: Optional[int] = None) -> Dict[str, object]:
+        # Validação dos campos antes de enviar
+        actual_port = port or self.settings.listen_port
+        actual_ttl = ttl or self.settings.ttl_seconds
+        
+        try:
+            validate_name(self.settings.name)
+            validate_namespace(self.settings.namespace)
+            validate_port(actual_port)
+            validate_ttl(actual_ttl)
+        except ConfigValidationError as exc:
+            raise RendezvousError(f"Validação falhou: {exc}") from exc
+        
         payload = {
             "type": "REGISTER",
             "namespace": self.settings.namespace,
             "name": self.settings.name,
-            "port": port or self.settings.listen_port,
-            "ttl": ttl or self.settings.ttl_seconds,
+            "port": actual_port,
+            "ttl": actual_ttl,
         }
         data = self._send_request(payload)
         if data.get("status") != "OK":

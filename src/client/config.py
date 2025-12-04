@@ -14,6 +14,61 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 
+# Limites definidos na especificação
+MAX_NAME_LENGTH = 64
+MAX_NAMESPACE_LENGTH = 64
+MIN_PORT = 1
+MAX_PORT = 65535
+MIN_TTL = 1
+MAX_TTL = 86400  # 24 horas em segundos
+MAX_PAYLOAD_BYTES = 32 * 1024  # 32KB
+
+
+class ConfigValidationError(ValueError):
+    """Erro de validação de configuração."""
+    pass
+
+
+def validate_name(name: str) -> str:
+    """Valida o campo name (até 64 caracteres)."""
+    if not isinstance(name, str):
+        raise ConfigValidationError(f"name deve ser string, recebido: {type(name).__name__}")
+    if len(name) == 0:
+        raise ConfigValidationError("name não pode ser vazio")
+    if len(name) > MAX_NAME_LENGTH:
+        raise ConfigValidationError(f"name excede {MAX_NAME_LENGTH} caracteres: {len(name)}")
+    return name
+
+
+def validate_namespace(namespace: str) -> str:
+    """Valida o campo namespace (até 64 caracteres)."""
+    if not isinstance(namespace, str):
+        raise ConfigValidationError(f"namespace deve ser string, recebido: {type(namespace).__name__}")
+    if len(namespace) == 0:
+        raise ConfigValidationError("namespace não pode ser vazio")
+    if len(namespace) > MAX_NAMESPACE_LENGTH:
+        raise ConfigValidationError(f"namespace excede {MAX_NAMESPACE_LENGTH} caracteres: {len(namespace)}")
+    return namespace
+
+
+def validate_port(port: int) -> int:
+    """Valida o campo port (1-65535)."""
+    if not isinstance(port, int):
+        raise ConfigValidationError(f"port deve ser inteiro, recebido: {type(port).__name__}")
+    if port < MIN_PORT or port > MAX_PORT:
+        raise ConfigValidationError(f"port deve estar entre {MIN_PORT} e {MAX_PORT}, recebido: {port}")
+    return port
+
+
+def validate_ttl(ttl: int) -> int:
+    """Valida o campo ttl (1-86400 segundos)."""
+    if not isinstance(ttl, int):
+        raise ConfigValidationError(f"ttl deve ser inteiro, recebido: {type(ttl).__name__}")
+    if ttl < MIN_TTL or ttl > MAX_TTL:
+        raise ConfigValidationError(f"ttl deve estar entre {MIN_TTL} e {MAX_TTL} segundos, recebido: {ttl}")
+    return ttl
+
+
 @dataclass(slots=True)
 class ClientSettings:
     """Conjunto de parâmetros centrais do cliente.
@@ -28,7 +83,7 @@ class ClientSettings:
     namespace: str = "CIC"
     rendezvous_host: str = "pyp2p.mfcaetano.cc"
     rendezvous_port: int = 8080
-    rendezvous_timeout: float = 5.0  # segundos
+    rendezvous_timeout: float = 10.0  # segundos
     listen_host: str = "0.0.0.0"
     listen_port: int = 6000
     ttl_seconds: int = 7200
@@ -49,6 +104,18 @@ class ClientSettings:
 
         return f"{self.name}@{self.namespace}"
 
+    def validate(self) -> None:
+        """Valida todos os campos conforme especificação do protocolo.
+        
+        Raises:
+            ConfigValidationError: Se algum campo estiver fora dos limites.
+        """
+        validate_name(self.name)
+        validate_namespace(self.namespace)
+        validate_port(self.listen_port)
+        validate_port(self.rendezvous_port)
+        validate_ttl(self.ttl_seconds)
+
     @classmethod
     def from_file(cls, path: Optional[Path]) -> "ClientSettings":
         """Carrega configurações de um arquivo JSON, se existir."""
@@ -66,6 +133,7 @@ class ClientSettings:
         extra = {key: value for key, value in raw_data.items() if key not in known_fields}
         settings = cls(**init_kwargs, config_file=path)
         settings.extra.update(extra)
+        settings.validate()  # Valida após carregar
         return settings
 
     def to_dict(self) -> Dict[str, Any]:

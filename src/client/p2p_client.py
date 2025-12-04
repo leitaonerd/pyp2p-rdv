@@ -1,6 +1,7 @@
 """High-level orchestrator for the PyP2P client."""
 from __future__ import annotations
 
+import json
 import logging
 import socket
 import threading
@@ -76,6 +77,7 @@ class P2PClient:
         self.cli.start()
         self.router.start_ack_checker()
         self.discover_once()
+        self.reconcile_peer_connections()  # Conecta imediatamente aos peers descobertos
         self._start_discovery_worker()
         self._start_reconnect_worker()
 
@@ -115,18 +117,59 @@ class P2PClient:
             return
 
         seen_ids = set()
+        new_peers = []
+        updated_peers = []
+        
         for peer in peers:
             if peer.peer_id == self.settings.peer_id:
                 continue
             seen_ids.add(peer.peer_id)
-            self.peer_table.upsert_peer(peer)
+            is_new = self.peer_table.upsert_peer(peer)
+            if is_new:
+                new_peers.append(peer)
+                logger.info("Novo peer descoberto: %s (%s:%d)", peer.peer_id, peer.address, peer.port)
+            else:
+                updated_peers.append(peer)
+        
         if seen_ids:
             self.peer_table.mark_missing_as_stale(seen_ids, stale_after=self.settings.discovery_interval * 2)
+        
+        if new_peers:
+            logger.info("DISCOVER: %d novos peers, %d atualizados", len(new_peers), len(updated_peers))
+            # Tenta conectar imediatamente aos novos peers descobertos
+            for peer in new_peers:
+                if peer.peer_id not in self.connections:
+                    self.connect_to_peer(peer)
+        else:
+            logger.debug("DISCOVER: %d peers atualizados, nenhum novo", len(updated_peers))
+        
         logger.debug("PeerTable sincronizada: %s", self.peer_table.stats())
 
     def _handle_inbound_socket(self, peer: PeerInfo, conn: socket.socket) -> None:
-        """Recebe socket aceito pelo PeerServer e inicia o PeerConnection."""
-
+        """Recebe socket aceito pelo PeerServer e inicia o PeerConnection.
+        
+        Se já existe uma conexão com este peer (ele já conectou ou nós conectamos nele),
+        a nova conexão é rejeitada para evitar duplicatas.
+        """
+        # Verifica se já existe conexão com este peer
+        if peer.peer_id in self.connections:
+            logger.info("Conexão inbound de %s rejeitada: já existe conexão ativa", peer.peer_id)
+            try:
+                # Envia uma mensagem de rejeição antes de fechar
+                reject_msg = {
+                    "type": "HELLO_REJECT",
+                    "reason": "Conexão duplicada - já existe conexão ativa",
+                    "peer_id": self.settings.peer_id
+                }
+                conn.sendall((json.dumps(reject_msg) + "\n").encode("utf-8"))
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
+            return
+        
         self.peer_table.upsert_peer(peer)
         connection = PeerConnection.from_inbound(
             self.settings,
@@ -137,6 +180,7 @@ class P2PClient:
         )
         self.connections[peer.peer_id] = connection
         connection.start_reader()
+        logger.info("Conexão inbound aceita de %s", peer.peer_id)
 
     def _on_connection_message(self, connection: PeerConnection, message: dict) -> None:
         self.router.handle_incoming(message, connection)
@@ -196,14 +240,25 @@ class P2PClient:
         self._reconnect_thread = None
 
     def connect_to_peer(self, peer: PeerInfo) -> bool:
-        """Estabelece conexão outbound com peer"""
+        """Estabelece conexão outbound com peer.
+        
+        Não conecta se já existir uma conexão (inbound ou outbound) com este peer.
+        """
         if peer.peer_id in self.connections:
-            logger.debug("Já conectado a %s", peer.peer_id)
+            existing = self.connections[peer.peer_id]
+            conn_type = "inbound" if not existing.is_outbound else "outbound"
+            logger.debug("Já conectado a %s (conexão %s)", peer.peer_id, conn_type)
             return True
         
         try:
             connection = PeerConnection.connect_outbound(self.settings, peer,
             on_message=self._on_connection_message, on_closed=self._on_connection_closed)
+
+            # Verificação extra de race condition
+            if peer.peer_id in self.connections:
+                logger.info("Conexão outbound com %s cancelada: conexão inbound chegou primeiro", peer.peer_id)
+                connection.close()
+                return True
 
             self.connections[peer.peer_id] = connection
             connection.start_reader()

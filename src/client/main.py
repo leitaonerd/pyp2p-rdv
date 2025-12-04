@@ -1,18 +1,17 @@
-""" 
-    Universidade de Brasília
-    Instituto de Ciências Exatas
-    Departamento de Ciência da Computação
-    Redes de Computadores – 2025.2
+"""Entry-point helper for running the PyP2P client.
 
-    Trabalho de Programação — Chat P2P
-    Grupo 6
-    Integrantes:
+Universidade de Brasília
+Instituto de Ciências Exatas
+Departamento de Ciência da Computação
+Redes de Computadores – 2025.2
+
+Trabalho de Programação — Chat P2P
+Grupo 6
+Integrantes:
     Júlia Paulo Amorim - 241039270
     Rafael Medeiros de Alencar - 241020760
     Samuel Philipe Domingues de Oliveira - 241002458
 """
-
-"""Entry-point helper for running the PyP2P client."""
 from __future__ import annotations
 
 import argparse

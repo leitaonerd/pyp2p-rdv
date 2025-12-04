@@ -1,7 +1,24 @@
 {
-    "name": "rafael",
-    "namespace": "UnB",
-    "rendezvous_host": "pyp2p.mfcaetano.cc",
+    "_comment": "Configurações do cliente PyP2P - Todos os campos são opcionais (usam defaults se omitidos)",
+    
+    "name": "grupo6",
+    "namespace": "CIC",
+    
+    "rendezvous_host": "192.168.50.2",
     "rendezvous_port": 8080,
-    "listen_port": 6000
+    "rendezvous_timeout": 10.0,
+    
+    "listen_host": "0.0.0.0",
+    "listen_port": 6000,
+    
+    "ttl_seconds": 7200,
+    "discovery_interval": 30.0,
+    "ping_interval": 20.0,
+    
+    "reconnect_backoff_base": 2.0,
+    "max_reconnect_attempts": 5,
+    
+    "log_level": "INFO",
+    "save_logs_to_file": false,
+    "log_file_path": null
 }
